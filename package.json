@@ -1,0 +1,75 @@
+{
+  "name": "markdown-sql-lint",
+  "displayName": "Markdown SQL Lint",
+  "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files, powered by the real PostgreSQL parser (libpg_query).",
+  "version": "0.1.0",
+  "publisher": "MB42",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bluemihai/markdown-sql-lint.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "sql",
+    "postgres",
+    "postgresql",
+    "markdown",
+    "lint",
+    "code block",
+    "fence"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Markdown SQL Lint",
+      "properties": {
+        "markdownSqlLint.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable linting of SQL code blocks in Markdown files."
+        },
+        "markdownSqlLint.fenceLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "sql",
+            "postgres",
+            "postgresql",
+            "pgsql"
+          ],
+          "description": "Code fence info strings treated as SQL (case-insensitive)."
+        },
+        "markdownSqlLint.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "description": "Delay in milliseconds after typing stops before re-linting."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "npm run compile && node test/run.js",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "libpg-query": "17.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.0"
+  }
+}
