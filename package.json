@@ -2,8 +2,9 @@
   "name": "markdown-sql-lint",
   "displayName": "Markdown SQL Lint",
   "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files, powered by the real PostgreSQL parser (libpg_query).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "MB42",
+  "icon": "images/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
