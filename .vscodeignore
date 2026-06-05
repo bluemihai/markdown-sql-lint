@@ -1,6 +1,8 @@
 .vscode/**
 src/**
 CONTRIBUTING.md
+images/mb42-logo.*
+images/icon.svg
 test/**
 sample/**
 out/**/*.map
