@@ -23,6 +23,10 @@ This extension fills that gap.
 - Heuristic `Hint:` lines for common mistakes — trailing comma before `FROM`, keyword
   typos (`SELEC` → "Did you mean SELECT?"), unclosed parentheses, reserved words used
   as table names
+- **Style suggestions** (blue squiggles, clearly worded as suggestions — never errors):
+  keyword capitalization, terminating semicolons, `SELECT *`. Defaults follow
+  [sqlstyle.guide](https://www.sqlstyle.guide); every rule is configurable or can be
+  switched off, and safe fixes are offered as one-click lightbulb actions
 - Multi-statement blocks supported
 - Pure-WASM parser bundled with the extension — **no Python, no database, nothing to install**
 - `~~~` fences, longer fence markers, and case-insensitive info strings all handled
@@ -34,6 +38,17 @@ This extension fills that gap.
 | `markdownSqlLint.enable` | `true` | Master switch |
 | `markdownSqlLint.fenceLanguages` | `["sql", "postgres", "postgresql", "pgsql"]` | Fence info strings treated as SQL |
 | `markdownSqlLint.debounceMs` | `300` | Idle delay before re-linting |
+| `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
+| `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
+| `markdownSqlLint.rules.discourageSelectStar` | `true` | Suggest naming columns instead of `SELECT *` |
+
+Style rules are *suggestions by design*: they render as blue info squiggles (never red),
+their messages start with "Suggestion:", and they only appear on blocks that already
+parse — a block with a syntax error shows exactly one problem, the error.
+
+Like a `.rubocop.yml`, you can commit house style with a project: put the
+`markdownSqlLint.rules.*` keys in the workspace's `.vscode/settings.json` and everyone
+opening that folder gets the same conventions.
 
 ## Limitations (by design, for now)
 

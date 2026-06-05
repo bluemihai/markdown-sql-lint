@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { parse, SqlError, hasSqlDetails } from 'libpg-query';
 import { extractSqlFences, offsetToPosition, tokenLengthAt } from './fences';
 import { hintFor, tokenFromMessage } from './hints';
+import { checkStyle, DEFAULT_STYLE, StyleFinding } from './rules';
 
 const SOURCE = 'markdown-sql-lint';
 
@@ -9,6 +10,13 @@ let diagnostics: vscode.DiagnosticCollection;
 const pendingLints = new Map<string, NodeJS.Timeout>();
 /** Guards against an older async lint overwriting a newer one's results. */
 const lintGenerations = new Map<string, number>();
+/** Quick fixes for the latest style findings, looked up by the code-action provider. */
+interface StoredFix {
+  range: vscode.Range;
+  newText: string;
+  title: string;
+}
+const quickFixes = new Map<string, StoredFix[]>();
 
 function config() {
   const cfg = vscode.workspace.getConfiguration('markdownSqlLint');
@@ -16,6 +24,11 @@ function config() {
     enable: cfg.get<boolean>('enable', true),
     fenceLanguages: cfg.get<string[]>('fenceLanguages', ['sql', 'postgres', 'postgresql', 'pgsql']),
     debounceMs: cfg.get<number>('debounceMs', 300),
+    style: {
+      keywordCase: cfg.get<string>('rules.keywordCase', DEFAULT_STYLE.keywordCase),
+      requireSemicolon: cfg.get<boolean>('rules.requireSemicolon', DEFAULT_STYLE.requireSemicolon),
+      discourageSelectStar: cfg.get<boolean>('rules.discourageSelectStar', DEFAULT_STYLE.discourageSelectStar),
+    },
   };
 }
 
@@ -33,8 +46,10 @@ async function lintDocument(doc: vscode.TextDocument): Promise<void> {
   const generation = (lintGenerations.get(key) ?? 0) + 1;
   lintGenerations.set(key, generation);
 
+  const { style } = config();
   const fences = extractSqlFences(doc.getText(), fenceLanguages);
   const found: vscode.Diagnostic[] = [];
+  const fixes: StoredFix[] = [];
 
   for (const fence of fences) {
     if (fence.sql.trim() === '') {
@@ -42,6 +57,11 @@ async function lintDocument(doc: vscode.TextDocument): Promise<void> {
     }
     try {
       await parse(fence.sql);
+      // Style suggestions only for blocks that parse — a block with a syntax
+      // error should show exactly one problem: the error.
+      for (const finding of checkStyle(fence.sql, style)) {
+        found.push(toStyleDiagnostic(finding, fence.sql, fence.startLine, fixes));
+      }
     } catch (e) {
       if (!(e instanceof SqlError)) {
         throw e;
@@ -55,6 +75,31 @@ async function lintDocument(doc: vscode.TextDocument): Promise<void> {
     return;
   }
   diagnostics.set(doc.uri, found);
+  quickFixes.set(key, fixes);
+}
+
+function toStyleDiagnostic(
+  finding: StyleFinding,
+  sql: string,
+  startLine: number,
+  fixes: StoredFix[]
+): vscode.Diagnostic {
+  const start = offsetToPosition(sql, finding.offset);
+  const end = offsetToPosition(sql, finding.offset + finding.length);
+  const range = new vscode.Range(startLine + start.line, start.character, startLine + end.line, end.character);
+  const diagnostic = new vscode.Diagnostic(range, finding.message, vscode.DiagnosticSeverity.Information);
+  diagnostic.source = SOURCE;
+  diagnostic.code = finding.ruleId;
+  if (finding.fix) {
+    const fixStart = offsetToPosition(sql, finding.fix.offset);
+    const fixEnd = offsetToPosition(sql, finding.fix.offset + finding.fix.length);
+    fixes.push({
+      range: new vscode.Range(startLine + fixStart.line, fixStart.character, startLine + fixEnd.line, fixEnd.character),
+      newText: finding.fix.newText,
+      title: finding.fix.title,
+    });
+  }
+  return diagnostic;
 }
 
 function toDiagnostic(error: SqlError, sql: string, startLine: number): vscode.Diagnostic {
@@ -109,7 +154,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument((doc) => {
       diagnostics.delete(doc.uri);
       lintGenerations.delete(doc.uri.toString());
+      quickFixes.delete(doc.uri.toString());
     }),
+    vscode.languages.registerCodeActionsProvider('markdown', {
+      provideCodeActions(doc, range) {
+        const actions: vscode.CodeAction[] = [];
+        for (const fix of quickFixes.get(doc.uri.toString()) ?? []) {
+          if (fix.range.intersection(range) || fix.range.start.isEqual(range.start)) {
+            const action = new vscode.CodeAction(fix.title, vscode.CodeActionKind.QuickFix);
+            action.edit = new vscode.WorkspaceEdit();
+            action.edit.replace(doc.uri, fix.range, fix.newText);
+            actions.push(action);
+          }
+        }
+        return actions;
+      },
+    }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('markdownSqlLint')) {
         for (const doc of vscode.workspace.textDocuments) {

@@ -10,7 +10,7 @@ CREATE TABLE type (
 );
 
 INSERT INTO agent(badge_number, name)
-VALUESll
+VALUES
     (71717, 'Mik'),
     (43293, 'Kamiel');
 ```
@@ -18,7 +18,7 @@ VALUESll
 This block has a dangling comma — expect a squiggle on `FROM`:
 
 ```sql
-SELECT id
+SELECT id,
 FROM users;
 ```
 
@@ -34,6 +34,17 @@ Unclosed parenthesis — expect an error at the semicolon:
 ```sql
 INSERT INTO location (street, city, postal_code
 VALUES ('425 Phillips Pine', 'Susanmouth', 'MI 20522');
+```
+
+Style suggestions (blue, not red — and a lightbulb quick fix where safe):
+
+```sql
+select id, name
+from agent
+```
+
+```sql
+SELECT * FROM incident;
 ```
 
 Non-SQL fences are ignored:

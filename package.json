@@ -2,7 +2,7 @@
   "name": "markdown-sql-lint",
   "displayName": "Markdown SQL Lint",
   "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files, powered by the real PostgreSQL parser (libpg_query).",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "MB42",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -55,6 +55,26 @@
           "type": "number",
           "default": 300,
           "description": "Delay in milliseconds after typing stops before re-linting."
+        },
+        "markdownSqlLint.rules.keywordCase": {
+          "type": "string",
+          "enum": [
+            "upper",
+            "lower",
+            "off"
+          ],
+          "default": "upper",
+          "description": "Suggest a capitalization style for SQL keywords (shown as a suggestion, never an error)."
+        },
+        "markdownSqlLint.rules.requireSemicolon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suggest terminating statements with a semicolon."
+        },
+        "markdownSqlLint.rules.discourageSelectStar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suggest naming columns explicitly instead of SELECT *."
         }
       }
     }

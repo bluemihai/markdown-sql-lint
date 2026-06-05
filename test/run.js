@@ -6,6 +6,7 @@
 const assert = require('node:assert');
 const { extractSqlFences, offsetToPosition, tokenLengthAt } = require('../out/fences');
 const { hintFor, tokenFromMessage } = require('../out/hints');
+const { checkStyle, DEFAULT_STYLE } = require('../out/rules');
 const { parse, SqlError } = require('libpg-query');
 
 const LANGS = ['sql', 'postgres', 'postgresql', 'pgsql'];
@@ -141,6 +142,48 @@ function test(name, fn) {
   await test('tokenFromMessage extracts quoted token', () => {
     assert.strictEqual(tokenFromMessage('syntax error at or near "FROM"'), 'FROM');
     assert.strictEqual(tokenFromMessage('something without a token'), undefined);
+  });
+
+  await test('style: lowercase keywords flagged with fix, defaults', () => {
+    const findings = checkStyle('select id from users;', DEFAULT_STYLE);
+    const kw = findings.filter((f) => f.ruleId === 'keyword-case');
+    assert.deepStrictEqual(kw.map((f) => f.fix.newText), ['SELECT', 'FROM']);
+    assert.strictEqual(kw[0].offset, 0);
+    assert.match(kw[0].message, /^Suggestion:/);
+  });
+
+  await test('style: keywordCase lower mode flags uppercase', () => {
+    const findings = checkStyle('SELECT id FROM users;', { ...DEFAULT_STYLE, keywordCase: 'lower' });
+    assert.deepStrictEqual(findings.filter((f) => f.ruleId === 'keyword-case').map((f) => f.fix.newText), ['select', 'from']);
+  });
+
+  await test('style: keywords inside strings and quoted identifiers ignored', () => {
+    const findings = checkStyle('SELECT \'select\' AS x, "from" FROM t;', DEFAULT_STYLE);
+    assert.strictEqual(findings.filter((f) => f.ruleId === 'keyword-case').length, 0);
+  });
+
+  await test('style: missing semicolon flagged with insert fix', () => {
+    const findings = checkStyle('SELECT id FROM users', DEFAULT_STYLE);
+    const semi = findings.find((f) => f.ruleId === 'require-semicolon');
+    assert.ok(semi);
+    assert.strictEqual(semi.fix.newText, ';');
+    assert.strictEqual(semi.fix.offset, 'SELECT id FROM users'.length);
+  });
+
+  await test('style: trailing comment does not hide the semicolon', () => {
+    const findings = checkStyle('SELECT id FROM users; -- done', DEFAULT_STYLE);
+    assert.strictEqual(findings.filter((f) => f.ruleId === 'require-semicolon').length, 0);
+  });
+
+  await test('style: SELECT * flagged, COUNT(*) not', () => {
+    const stars = (sql) => checkStyle(sql, DEFAULT_STYLE).filter((f) => f.ruleId === 'select-star');
+    assert.strictEqual(stars('SELECT * FROM users;').length, 1);
+    assert.strictEqual(stars('SELECT COUNT(*) FROM users;').length, 0);
+  });
+
+  await test('style: rules can be switched off', () => {
+    const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false };
+    assert.deepStrictEqual(checkStyle('select * from users', off), []);
   });
 
   console.log(`\n${passed} test(s) passed${process.exitCode ? ', with failures' : ''}`);

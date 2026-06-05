@@ -46,10 +46,15 @@ function editDistance(a: string, b: string): number {
   return prev[n];
 }
 
-/** Strip string literals and comments so structural checks don't trip on their contents. */
-function stripLiterals(sql: string): string {
+/**
+ * Strip string literals, quoted identifiers, and comments (replacing them
+ * with spaces, preserving offsets) so structural checks don't trip on their
+ * contents. Shared by the hint heuristics and the style rules.
+ */
+export function stripLiterals(sql: string): string {
   return sql
     .replace(/'(?:[^']|'')*'/g, (s) => ' '.repeat(s.length))
+    .replace(/"(?:[^"]|"")*"/g, (s) => ' '.repeat(s.length))
     .replace(/--[^\n]*/g, (s) => ' '.repeat(s.length))
     .replace(/\/\*[\s\S]*?\*\//g, (s) => ' '.repeat(s.length));
 }
