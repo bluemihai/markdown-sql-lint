@@ -31,7 +31,7 @@ This extension fills that gap.
   typos (`SELEC` → "Did you mean SELECT?"), unclosed parentheses, reserved words used
   as table names
 - **Style suggestions** (blue squiggles, clearly worded as suggestions — never errors):
-  keyword capitalization, terminating semicolons, `SELECT *`. Defaults follow
+  keyword capitalization, terminating semicolons, optionally `SELECT *`. Defaults follow
   [sqlstyle.guide](https://www.sqlstyle.guide); every rule is configurable or can be
   switched off, and safe fixes are offered as one-click lightbulb actions
 - Multi-statement blocks supported
@@ -48,7 +48,7 @@ This extension fills that gap.
 | `markdownSqlLint.debounceMs` | `300` | Idle delay before re-linting |
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
-| `markdownSqlLint.rules.discourageSelectStar` | `true` | Suggest naming columns instead of `SELECT *` |
+| `markdownSqlLint.rules.discourageSelectStar` | `false` | Suggest listing columns instead of `SELECT *` (opt-in: `SELECT *` is normal while exploring) |
 
 Style rules are *suggestions by design*: they render as blue info squiggles (never red),
 their messages start with "Suggestion:", and they only appear on blocks that already

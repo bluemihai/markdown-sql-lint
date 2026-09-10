@@ -19,7 +19,7 @@ export interface StyleConfig {
 export const DEFAULT_STYLE: StyleConfig = {
   keywordCase: 'upper',
   requireSemicolon: true,
-  discourageSelectStar: true,
+  discourageSelectStar: false,
 };
 
 export interface StyleFinding {
@@ -99,7 +99,7 @@ export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
       findings.push({
         offset: starAt,
         length: 1,
-        message: 'Suggestion: name the columns you need instead of SELECT *.',
+        message: 'Suggestion: consider listing the columns you need; SELECT * is fine while exploring.',
         ruleId: 'select-star',
         // no auto-fix: only the author knows which columns they need
       });

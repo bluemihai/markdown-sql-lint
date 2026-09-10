@@ -2,7 +2,7 @@
   "name": "markdown-sql-lint",
   "displayName": "Markdown SQL Lint",
   "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files — psql meta-commands (\\d, \\dt) and prompts understood. Powered by the real PostgreSQL parser (libpg_query).",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "MB42",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -90,8 +90,8 @@
         },
         "markdownSqlLint.rules.discourageSelectStar": {
           "type": "boolean",
-          "default": true,
-          "description": "Suggest naming columns explicitly instead of SELECT *."
+          "default": false,
+          "description": "Suggest listing columns instead of SELECT * (off by default: SELECT * is normal while exploring a schema)."
         }
       }
     }

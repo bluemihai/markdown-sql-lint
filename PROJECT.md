@@ -1,7 +1,7 @@
 # Markdown SQL Lint — project notes
 
 A small VS Code extension Mihai wrote, **published to the marketplace** (publisher
-`MB42`, current version `0.3.0`). It's a *pet project* in the sense of **unofficial** —
+`MB42`, current version `0.3.1`). It's a *pet project* in the sense of **unofficial** —
 not part of any sanctioned Saxion deliverable — but it does a real job: it supports the
 **SQL module** assignments (notably **sql-practice**), where course material and homework
 embed SQL inside Markdown code fences.
@@ -30,7 +30,7 @@ Four layers of feedback:
 2. **Heuristic hints** — trailing comma before `FROM`, keyword typos (`SELEC` →
    "Did you mean SELECT?"), unclosed parens, reserved words as table names.
 3. **Style suggestions** (blue squiggles, never red, prefixed "Suggestion:") — keyword
-   case, terminating semicolons, `SELECT *`. Defaults follow
+   case, terminating semicolons, optionally `SELECT *` (off by default since 0.3.1). Defaults follow
    [sqlstyle.guide](https://www.sqlstyle.guide); each rule is configurable or off, with
    one-click lightbulb fixes. House style can be committed per-workspace via
    `.vscode/settings.json`, like a `.rubocop.yml`.
@@ -51,7 +51,7 @@ so Mihai built it.
   suggestions).
 - Dependency: `libpg-query@17.7.3` (WASM PostgreSQL parser).
 - Scripts: `npm run compile` / `watch` / `test` (`npm run compile && node test/run.js`).
-- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.3.0); the Marketplace is the artifact store.
+- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.3.1); the Marketplace is the artifact store.
 
 ## Settings
 
@@ -63,7 +63,7 @@ so Mihai built it.
 | `markdownSqlLint.debounceMs` | `300` | Idle delay before re-linting |
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
-| `markdownSqlLint.rules.discourageSelectStar` | `true` | Suggest explicit columns over `SELECT *` |
+| `markdownSqlLint.rules.discourageSelectStar` | `false` | Suggest explicit columns over `SELECT *` (opt-in) |
 
 ## Scope (by design, for now)
 

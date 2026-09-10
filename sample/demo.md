@@ -43,6 +43,8 @@ select id, name
 from agent
 ```
 
+`SELECT *` is not flagged unless you opt in (`markdownSqlLint.rules.discourageSelectStar`):
+
 ```sql
 SELECT * FROM incident;
 ```

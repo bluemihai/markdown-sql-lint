@@ -176,9 +176,11 @@ function test(name, fn) {
     assert.strictEqual(findings.filter((f) => f.ruleId === 'require-semicolon').length, 0);
   });
 
-  await test('style: SELECT * flagged, COUNT(*) not', () => {
-    const stars = (sql) => checkStyle(sql, DEFAULT_STYLE).filter((f) => f.ruleId === 'select-star');
+  await test('style: SELECT * flagged only when opted in, COUNT(*) never', () => {
+    const on = { ...DEFAULT_STYLE, discourageSelectStar: true };
+    const stars = (sql) => checkStyle(sql, on).filter((f) => f.ruleId === 'select-star');
     assert.strictEqual(stars('SELECT * FROM users;').length, 1);
+    assert.strictEqual(checkStyle('SELECT * FROM users;', DEFAULT_STYLE).filter((f) => f.ruleId === 'select-star').length, 0, 'off by default');
     assert.strictEqual(stars('SELECT COUNT(*) FROM users;').length, 0);
   });
 
