@@ -279,5 +279,18 @@ function test(name, fn) {
     assert.strictEqual(out, '\\d agent\nSELECT id FROM agent;\n\\dt');
   });
 
+  await test('style: semicolon goes after a trailing string literal, not before it', () => {
+    const sql = "SELECT * FROM agent\nWHERE first_name LIKE 'Groucho'";
+    const semi = checkStyle(sql, DEFAULT_STYLE).find((f) => f.ruleId === 'require-semicolon');
+    assert.ok(semi);
+    assert.strictEqual(semi.fix.offset, sql.length);
+    assert.strictEqual(applyFixes(sql, checkStyle(sql, DEFAULT_STYLE)), sql + ';');
+    // Same with a trailing quoted identifier and a trailing comment after a literal.
+    const quoted = 'SELECT id FROM "Agent"';
+    assert.strictEqual(applyFixes(quoted, checkStyle(quoted, DEFAULT_STYLE)), quoted + ';');
+    const commented = "SELECT 'a' -- note";
+    assert.strictEqual(applyFixes(commented, checkStyle(commented, DEFAULT_STYLE)), "SELECT 'a'; -- note");
+  });
+
   console.log(`\n${passed} test(s) passed${process.exitCode ? ', with failures' : ''}`);
 })();

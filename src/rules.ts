@@ -67,6 +67,19 @@ export function applyFixes(sql: string, findings: StyleFinding[]): string {
   return out;
 }
 
+/**
+ * Blank comments only, keeping string literals and quoted identifiers as
+ * (opaque) content, so "the end of the last statement" includes a trailing
+ * literal. Literals are replaced first so a `--` inside one is not a comment.
+ */
+function maskComments(sql: string): string {
+  return sql
+    .replace(/'(?:[^']|'')*'/g, (m) => 'x'.repeat(m.length))
+    .replace(/"(?:[^"]|"")*"/g, (m) => 'x'.repeat(m.length))
+    .replace(/--[^\n]*/g, (m) => ' '.repeat(m.length))
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length));
+}
+
 export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
   const findings: StyleFinding[] = [];
   const stripped = stripLiterals(sql);
@@ -96,7 +109,11 @@ export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
   if (config.requireSemicolon) {
     const trimmed = stripped.trimEnd();
     if (trimmed.length > 0 && !trimmed.endsWith(';')) {
-      const at = trimmed.length - 1;
+      // `stripped` decides WHETHER a terminator exists (literals and comments
+      // can't hide one), but it blanks literals to spaces — so a trailing
+      // 'Groucho' would be trimmed away and the fix would land after LIKE.
+      // Position the fix on a mask that keeps literals as content.
+      const at = maskComments(sql).trimEnd().length - 1;
       findings.push({
         offset: at,
         length: 1,

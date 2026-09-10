@@ -1,7 +1,7 @@
 # Markdown SQL Lint — project notes
 
 A small VS Code extension Mihai wrote, **published to the marketplace** (publisher
-`MB42`, current version `0.4.0`). It's a *pet project* in the sense of **unofficial** —
+`MB42`, current version `0.4.1`). It's a *pet project* in the sense of **unofficial** —
 not part of any sanctioned Saxion deliverable — but it does a real job: it supports the
 **SQL module** assignments (notably **sql-practice**), where course material and homework
 embed SQL inside Markdown code fences.
@@ -53,7 +53,7 @@ so Mihai built it.
   suggestions).
 - Dependency: `libpg-query@17.7.3` (WASM PostgreSQL parser).
 - Scripts: `npm run compile` / `watch` / `test` (`npm run compile && node test/run.js`).
-- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.4.0); the Marketplace is the artifact store.
+- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.4.1); the Marketplace is the artifact store.
 
 ## Settings
 
