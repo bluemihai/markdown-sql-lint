@@ -3,6 +3,7 @@ import { parse, SqlError, hasSqlDetails } from 'libpg-query';
 import { extractSqlFences, offsetToPosition, tokenLengthAt } from './fences';
 import { hintFor, tokenFromMessage } from './hints';
 import { checkStyle, DEFAULT_STYLE, StyleFinding } from './rules';
+import { splitPsql, PsqlFinding, PsqlMode } from './psql';
 
 const SOURCE = 'markdown-sql-lint';
 
@@ -22,7 +23,8 @@ function config() {
   const cfg = vscode.workspace.getConfiguration('markdownSqlLint');
   return {
     enable: cfg.get<boolean>('enable', true),
-    fenceLanguages: cfg.get<string[]>('fenceLanguages', ['sql', 'postgres', 'postgresql', 'pgsql']),
+    fenceLanguages: cfg.get<string[]>('fenceLanguages', ['sql', 'postgres', 'postgresql', 'pgsql', 'psql']),
+    psqlCommands: cfg.get<PsqlMode>('psqlCommands', 'check'),
     debounceMs: cfg.get<number>('debounceMs', 300),
     style: {
       keywordCase: cfg.get<string>('rules.keywordCase', DEFAULT_STYLE.keywordCase),
@@ -46,27 +48,33 @@ async function lintDocument(doc: vscode.TextDocument): Promise<void> {
   const generation = (lintGenerations.get(key) ?? 0) + 1;
   lintGenerations.set(key, generation);
 
-  const { style } = config();
+  const { style, psqlCommands } = config();
   const fences = extractSqlFences(doc.getText(), fenceLanguages);
   const found: vscode.Diagnostic[] = [];
   const fixes: StoredFix[] = [];
 
   for (const fence of fences) {
-    if (fence.sql.trim() === '') {
+    // Separate the psql layer (meta-commands, prompts) from the SQL; the
+    // SQL keeps its offsets, so positions below map straight onto the document.
+    const { sql, findings } = splitPsql(fence.sql, psqlCommands);
+    for (const finding of findings) {
+      found.push(toPsqlDiagnostic(finding, sql, fence.startLine));
+    }
+    if (sql.trim() === '') {
       continue;
     }
     try {
-      await parse(fence.sql);
+      await parse(sql);
       // Style suggestions only for blocks that parse — a block with a syntax
       // error should show exactly one problem: the error.
-      for (const finding of checkStyle(fence.sql, style)) {
-        found.push(toStyleDiagnostic(finding, fence.sql, fence.startLine, fixes));
+      for (const finding of checkStyle(sql, style)) {
+        found.push(toStyleDiagnostic(finding, sql, fence.startLine, fixes));
       }
     } catch (e) {
       if (!(e instanceof SqlError)) {
         throw e;
       }
-      found.push(toDiagnostic(e, fence.sql, fence.startLine));
+      found.push(toDiagnostic(e, sql, fence.startLine));
     }
   }
 
@@ -99,6 +107,16 @@ function toStyleDiagnostic(
       title: finding.fix.title,
     });
   }
+  return diagnostic;
+}
+
+function toPsqlDiagnostic(finding: PsqlFinding, sql: string, startLine: number): vscode.Diagnostic {
+  const start = offsetToPosition(sql, finding.offset);
+  const line = startLine + start.line;
+  const range = new vscode.Range(line, start.character, line, start.character + finding.length);
+  const diagnostic = new vscode.Diagnostic(range, finding.message, vscode.DiagnosticSeverity.Error);
+  diagnostic.source = SOURCE;
+  diagnostic.code = 'psql-command';
   return diagnostic;
 }
 

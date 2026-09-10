@@ -25,7 +25,7 @@ const RESERVED_AS_NAME = new Set([
   'unique', 'using', 'when', 'with', 'references', 'primary',
 ]);
 
-function editDistance(a: string, b: string): number {
+export function editDistance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   if (Math.abs(m - n) > 2) {

@@ -1,6 +1,8 @@
 # Markdown SQL Lint
 
-Live PostgreSQL syntax checking for ```` ```sql ```` code blocks in Markdown files.
+Live PostgreSQL syntax checking for ```` ```sql ```` code blocks in Markdown files —
+including the psql layer: `\d`, `\dt staff`, `\c dbname` and pasted `sd42=#` prompts are
+understood, not flagged.
 
 Errors show up as red squiggles **as you type**, exactly like any other linter — powered by
 [libpg_query](https://github.com/pganalyze/libpg_query), the *actual* PostgreSQL parser
@@ -18,8 +20,13 @@ This extension fills that gap.
 
 ## Features
 
-- Lints every ```` ```sql ```` / ```` ```postgresql ```` / ```` ```pgsql ```` fence on open and as you type (debounced)
+- Lints every ```` ```sql ```` / ```` ```postgresql ```` / ```` ```pgsql ```` / ```` ```psql ```` fence on open and as you type (debounced)
 - Real PostgreSQL syntax errors with exact positions, squiggle on the offending token
+- **psql-aware.** A block is what you'd type into `psql`, so meta-commands (`\d`,
+  `\dt staff`, `\timing on`, `\copy …`) and pasted prompts (`sd42=# `) are recognised
+  and set aside before the SQL is parsed. Mistyped ones are flagged against psql's own
+  command list: `\q;` ("not terminated with a semicolon"), `\D` ("case-sensitive"),
+  `\dstaff` ("use `\d` followed by a space"), `\timeing` ("did you mean `\timing`?")
 - Heuristic `Hint:` lines for common mistakes — trailing comma before `FROM`, keyword
   typos (`SELEC` → "Did you mean SELECT?"), unclosed parentheses, reserved words used
   as table names
@@ -36,7 +43,8 @@ This extension fills that gap.
 | Setting | Default | Description |
 |---|---|---|
 | `markdownSqlLint.enable` | `true` | Master switch |
-| `markdownSqlLint.fenceLanguages` | `["sql", "postgres", "postgresql", "pgsql"]` | Fence info strings treated as SQL |
+| `markdownSqlLint.fenceLanguages` | `["sql", "postgres", "postgresql", "pgsql", "psql"]` | Fence info strings treated as SQL |
+| `markdownSqlLint.psqlCommands` | `"check"` | `check`: recognise psql meta-commands, flag unknown ones · `ignore`: recognise, never flag · `error`: pure SQL only, every meta-command is an error |
 | `markdownSqlLint.debounceMs` | `300` | Idle delay before re-linting |
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
@@ -59,6 +67,8 @@ opening that folder gets the same conventions.
   (subsequent blocks are still checked independently).
 - **PostgreSQL dialect.** MySQL/SQLite-specific syntax will be flagged. Other dialects
   would need a different parser backend.
+- **psql meta-commands are checked by name only.** `\d staff` is accepted whether or not
+  `staff` exists; a meta-command must start its line (`SELECT 1 \g` is not recognised).
 
 ## Contributing
 

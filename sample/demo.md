@@ -47,6 +47,30 @@ from agent
 SELECT * FROM incident;
 ```
 
+psql meta-commands are part of the language — no squiggles here:
+
+```sql
+\d
+\d staff
+SELECT id FROM staff;
+\dt
+```
+
+A pasted psql transcript is fine too:
+
+```sql
+sd42=# SELECT id,
+sd42-#        name
+sd42-# FROM staff;
+```
+
+Mistyped meta-commands get a squiggle with a hint — `\q;`, `\D`, `\dstaff`, `\timeing`:
+
+```sql
+\dstaff
+\timeing on
+```
+
 Non-SQL fences are ignored:
 
 ```python

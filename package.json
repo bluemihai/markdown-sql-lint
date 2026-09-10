@@ -1,8 +1,8 @@
 {
   "name": "markdown-sql-lint",
   "displayName": "Markdown SQL Lint",
-  "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files, powered by the real PostgreSQL parser (libpg_query).",
-  "version": "0.2.1",
+  "description": "Live PostgreSQL syntax checking for ```sql code blocks in Markdown files — psql meta-commands (\\d, \\dt) and prompts understood. Powered by the real PostgreSQL parser (libpg_query).",
+  "version": "0.3.0",
   "publisher": "MB42",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "sql",
     "postgres",
     "postgresql",
+    "psql",
     "markdown",
     "lint",
     "code block",
@@ -47,9 +48,25 @@
             "sql",
             "postgres",
             "postgresql",
-            "pgsql"
+            "pgsql",
+            "psql"
           ],
           "description": "Code fence info strings treated as SQL (case-insensitive)."
+        },
+        "markdownSqlLint.psqlCommands": {
+          "type": "string",
+          "enum": [
+            "check",
+            "ignore",
+            "error"
+          ],
+          "enumDescriptions": [
+            "Recognise psql meta-commands (\\d, \\dt staff, \\c ...) and prompts; flag unknown or mistyped commands.",
+            "Recognise psql meta-commands and prompts; never flag them.",
+            "Pure SQL only: every psql meta-command or prompt is an error."
+          ],
+          "default": "check",
+          "description": "How to treat psql meta-commands and prompts inside SQL blocks."
         },
         "markdownSqlLint.debounceMs": {
           "type": "number",

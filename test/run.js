@@ -7,6 +7,7 @@ const assert = require('node:assert');
 const { extractSqlFences, offsetToPosition, tokenLengthAt } = require('../out/fences');
 const { hintFor, tokenFromMessage } = require('../out/hints');
 const { checkStyle, DEFAULT_STYLE } = require('../out/rules');
+const { splitPsql, isKnownMetaCommand } = require('../out/psql');
 const { parse, SqlError } = require('libpg-query');
 
 const LANGS = ['sql', 'postgres', 'postgresql', 'pgsql'];
@@ -184,6 +185,76 @@ function test(name, fn) {
   await test('style: rules can be switched off', () => {
     const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false };
     assert.deepStrictEqual(checkStyle('select * from users', off), []);
+  });
+
+  await test('psql: known meta-commands pass silently and are blanked', () => {
+    for (const name of ['d', 'd+', 'dS+', 'dt', 'dtvs', 'dtS+', 'dn', 'df', 'dfS+', 'dT', 'dd', 'dconfig', 'l', 'l+', 'c', 'connect', 'x', 'q', 'i', 'copy', 'timing', '?', '!', '!ls', 'h', 'e', 'set', 'pset', 'gx', 'lo_list+']) {
+      assert.ok(isKnownMetaCommand(name), `expected \\${name} to be known`);
+    }
+    const block = 'SELECT 1;\n\\d staff;\n\\x\\dt\nSELECT 2;';
+    const { sql, findings } = splitPsql(block, 'check');
+    assert.deepStrictEqual(findings, []);
+    assert.strictEqual(sql.length, block.length);
+    assert.strictEqual(sql, 'SELECT 1;\n         \n     \nSELECT 2;');
+  });
+
+  await test('psql: unknown meta-commands flagged with the right hint', () => {
+    const msg = (line) => splitPsql(line, 'check').findings.map((f) => f.message).join(' | ');
+    assert.match(msg('\\q;'), /not terminated with a semicolon .* \\q\./);
+    assert.match(msg('\\D'), /case-sensitive .* \\d\?/);
+    assert.match(msg('\\dstaff'), /\\d followed by a space/);
+    assert.match(msg('\\describe'), /\\d followed by a space/);
+    assert.match(msg('\\timeing on'), /Did you mean \\timing\?/);
+    assert.match(msg('\\zzzz'), /Type \\\? in psql/);
+    assert.doesNotMatch(msg('\\zzzz'), /Did you mean/);
+  });
+
+  await test('psql: finding offsets point at the backslash and cover the name', () => {
+    const block = 'SELECT 1;\n  \\q; \nSELECT 2;';
+    const { findings } = splitPsql(block, 'check');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].offset, 12);
+    assert.strictEqual(findings[0].length, 3);
+  });
+
+  await test('psql: prompts stripped only in transcript blocks', () => {
+    const transcript = 'sd42=# SELECT 1,\nsd42-# 2;\nsd42=# \\d staff';
+    const { sql, findings } = splitPsql(transcript, 'check');
+    assert.deepStrictEqual(findings, []);
+    assert.strictEqual(sql, '       SELECT 1,\n       2;\n               ');
+    // A named argument on a continuation line is not a prompt.
+    const sqlOnly = 'SELECT f(\nfoo=> 1);';
+    assert.strictEqual(splitPsql(sqlOnly, 'check').sql, sqlOnly);
+  });
+
+  await test('psql: a backslash inside a string literal is left alone', () => {
+    const block = "SELECT 'a\n\\d b';";
+    assert.strictEqual(splitPsql(block, 'check').sql, block);
+  });
+
+  await test('psql: ignore mode blanks everything silently, error mode flags everything', () => {
+    const block = 'sd42=# \\bogus\nsd42=# SELECT 1;';
+    const ignored = splitPsql(block, 'ignore');
+    assert.deepStrictEqual(ignored.findings, []);
+    assert.strictEqual(ignored.sql.trim(), 'SELECT 1;');
+    const errors = splitPsql('\\d\nSELECT 1;', 'error').findings;
+    assert.strictEqual(errors.length, 1);
+    assert.match(errors[0].message, /psql meta-command, not SQL/);
+    const prompted = splitPsql(block, 'error').findings;
+    assert.strictEqual(prompted.filter((f) => /psql prompt/.test(f.message)).length, 2);
+  });
+
+  await test('end-to-end: the assignment block with \\d parses clean and gets no semicolon nag', async () => {
+    const md = 'Run this block:\n\n```sql\n\\d\n```\n\n```sql\nSELECT id FROM staff;\n\\d staff\n```\n';
+    const fences = extractSqlFences(md, LANGS);
+    for (const fence of fences) {
+      const { sql, findings } = splitPsql(fence.sql, 'check');
+      assert.deepStrictEqual(findings, []);
+      if (sql.trim() !== '') {
+        await parse(sql);
+        assert.deepStrictEqual(checkStyle(sql, DEFAULT_STYLE), []);
+      }
+    }
   });
 
   console.log(`\n${passed} test(s) passed${process.exitCode ? ', with failures' : ''}`);

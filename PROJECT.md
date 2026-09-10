@@ -1,20 +1,30 @@
 # Markdown SQL Lint — project notes
 
 A small VS Code extension Mihai wrote, **published to the marketplace** (publisher
-`MB42`, current version `0.2.0`). It's a *pet project* in the sense of **unofficial** —
+`MB42`, current version `0.3.0`). It's a *pet project* in the sense of **unofficial** —
 not part of any sanctioned Saxion deliverable — but it does a real job: it supports the
 **SQL module** assignments (notably **sql-practice**), where course material and homework
 embed SQL inside Markdown code fences.
 
 ## What it does
 
-Live PostgreSQL syntax checking for ` ```sql ` / ` ```postgresql ` / ` ```pgsql ` code
-blocks in Markdown. Errors show as red squiggles **as you type** — powered by
+Live PostgreSQL syntax checking for ` ```sql ` / ` ```postgresql ` / ` ```pgsql ` / ` ```psql `
+code blocks in Markdown. **Scope (redefined 2026-09-10, v0.3.0): a block is what you type
+into `psql`, not pure server SQL.** That reframe came from grading: the sql-practice
+assignment text has ` ```sql ` blocks containing just `\d`, which the server parser rejects.
+Rather than a course-specific skip, the plugin now models the psql layer itself —
+meta-commands and prompts are separated from the SQL and checked against psql's real
+command list — which covers the course entirely and is honest for any psql user. Errors show as red squiggles **as you type** — powered by
 [libpg_query](https://github.com/pganalyze/libpg_query), the actual PostgreSQL parser
 extracted from the server (the same C library behind the Ruby `pg_query` gem), shipped
 here as a bundled **pure-WASM** parser. No Python, no database, nothing to install.
 
-Three layers of feedback:
+Four layers of feedback:
+0. **psql layer** (`src/psql.ts`) — meta-command lines (`\d`, `\dt staff`, `\c`,
+   `\timing`) and pasted prompts (`sd42=# `) are blanked out before parsing, offsets
+   preserved. Unknown/mistyped meta-commands are errors with hints (`\q;`, `\D`,
+   `\dstaff`, `\timeing`). Command list verified against a live psql 18, including its
+   leniencies (`\d staff;` works; `\dstaff` silently lists everything, so it is flagged).
 1. **Real syntax errors** — exact line/column, matching what `psql` would report (one
    error per block; the parser stops at the first).
 2. **Heuristic hints** — trailing comma before `FROM`, keyword typos (`SELEC` →
@@ -37,17 +47,19 @@ so Mihai built it.
 
 - **TypeScript**, compiled with `tsc` to `out/`; targets VS Code `^1.85.0`.
 - `src/` — `extension.ts` (activation + wiring), `fences.ts` (find SQL fences),
-  `hints.ts` (heuristic hints), `rules.ts` (style suggestions).
+  `psql.ts` (meta-commands + prompts), `hints.ts` (heuristic hints), `rules.ts` (style
+  suggestions).
 - Dependency: `libpg-query@17.7.3` (WASM PostgreSQL parser).
 - Scripts: `npm run compile` / `watch` / `test` (`npm run compile && node test/run.js`).
-- Packaged `.vsix` artifacts checked in (0.1.0 → 0.2.0).
+- Packaged `.vsix` artifacts checked in (0.1.0 → 0.3.0).
 
 ## Settings
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `markdownSqlLint.enable` | `true` | Master switch |
-| `markdownSqlLint.fenceLanguages` | `["sql","postgres","postgresql","pgsql"]` | Fence info strings treated as SQL |
+| `markdownSqlLint.fenceLanguages` | `["sql","postgres","postgresql","pgsql","psql"]` | Fence info strings treated as SQL |
+| `markdownSqlLint.psqlCommands` | `"check"` | psql meta-commands: `check` (flag unknown), `ignore`, or `error` (pure SQL only) |
 | `markdownSqlLint.debounceMs` | `300` | Idle delay before re-linting |
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
