@@ -34,6 +34,11 @@ This extension fills that gap.
   keyword capitalization, terminating semicolons, optionally `SELECT *`. Defaults follow
   [sqlstyle.guide](https://www.sqlstyle.guide); every rule is configurable or can be
   switched off, and safe fixes are offered as one-click lightbulb actions
+- **Format SQL blocks** — the command palette entry *Markdown SQL Lint: Format SQL blocks*,
+  also registered as a Markdown formatter so *Format Document* (⇧⌥F) works. It applies
+  every safe style fix (keyword case, terminating semicolons) to each SQL block that
+  parses, and touches nothing else: no reflow, no changes outside the fences, blocks
+  with a syntax error left alone
 - Multi-statement blocks supported
 - Pure-WASM parser bundled with the extension — **no Python, no database, nothing to install**
 - `~~~` fences, longer fence markers, and case-insensitive info strings all handled

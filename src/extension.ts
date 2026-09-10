@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { parse, SqlError, hasSqlDetails } from 'libpg-query';
 import { extractSqlFences, offsetToPosition, tokenLengthAt } from './fences';
 import { hintFor, tokenFromMessage } from './hints';
-import { checkStyle, DEFAULT_STYLE, StyleFinding } from './rules';
+import { checkStyle, applyFixes, DEFAULT_STYLE, StyleFinding } from './rules';
 import { splitPsql, PsqlFinding, PsqlMode } from './psql';
 
 const SOURCE = 'markdown-sql-lint';
@@ -144,6 +144,57 @@ function toDiagnostic(error: SqlError, sql: string, startLine: number): vscode.D
   return diagnostic;
 }
 
+/**
+ * Formatting = every safe style fix, applied to every SQL block that parses.
+ * Blocks with a syntax error are left alone (their problem is the error).
+ * Nothing outside the fences is touched.
+ */
+async function formatEdits(doc: vscode.TextDocument): Promise<vscode.TextEdit[]> {
+  const { fenceLanguages, style, psqlCommands } = config();
+  const edits: vscode.TextEdit[] = [];
+  for (const fence of extractSqlFences(doc.getText(), fenceLanguages)) {
+    const { sql } = splitPsql(fence.sql, psqlCommands);
+    if (sql.trim() === '') {
+      continue;
+    }
+    try {
+      await parse(sql);
+    } catch (e) {
+      if (!(e instanceof SqlError)) {
+        throw e;
+      }
+      continue;
+    }
+    const findings = checkStyle(sql, style);
+    // Fixes are computed on the psql-blanked text but only ever touch SQL
+    // tokens, so applying them to the original block is offset-safe.
+    const formatted = applyFixes(fence.sql, findings);
+    if (formatted !== fence.sql) {
+      const lastLine = fence.startLine + fence.sql.split('\n').length - 1;
+      const end = new vscode.Position(lastLine, doc.lineAt(lastLine).text.length);
+      edits.push(vscode.TextEdit.replace(new vscode.Range(fence.startLine, 0, end.line, end.character), formatted));
+    }
+  }
+  return edits;
+}
+
+async function formatSqlBlocks(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'markdown') {
+    void vscode.window.showInformationMessage('Markdown SQL Lint: open a Markdown file to format its SQL blocks.');
+    return;
+  }
+  const edits = await formatEdits(editor.document);
+  if (edits.length === 0) {
+    void vscode.window.setStatusBarMessage('Markdown SQL Lint: SQL blocks already formatted.', 3000);
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.set(editor.document.uri, edits);
+  await vscode.workspace.applyEdit(edit);
+  void vscode.window.setStatusBarMessage(`Markdown SQL Lint: formatted ${edits.length} SQL block${edits.length === 1 ? '' : 's'}.`, 3000);
+}
+
 function scheduleLint(doc: vscode.TextDocument): void {
   if (doc.languageId !== 'markdown') {
     return;
@@ -188,6 +239,10 @@ export function activate(context: vscode.ExtensionContext): void {
         return actions;
       },
     }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
+    vscode.commands.registerCommand('markdownSqlLint.formatSqlBlocks', () => formatSqlBlocks()),
+    vscode.languages.registerDocumentFormattingEditProvider('markdown', {
+      provideDocumentFormattingEdits: (doc) => formatEdits(doc),
+    }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('markdownSqlLint')) {
         for (const doc of vscode.workspace.textDocuments) {

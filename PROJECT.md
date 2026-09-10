@@ -1,7 +1,7 @@
 # Markdown SQL Lint — project notes
 
 A small VS Code extension Mihai wrote, **published to the marketplace** (publisher
-`MB42`, current version `0.3.1`). It's a *pet project* in the sense of **unofficial** —
+`MB42`, current version `0.4.0`). It's a *pet project* in the sense of **unofficial** —
 not part of any sanctioned Saxion deliverable — but it does a real job: it supports the
 **SQL module** assignments (notably **sql-practice**), where course material and homework
 embed SQL inside Markdown code fences.
@@ -19,7 +19,7 @@ command list — which covers the course entirely and is honest for any psql use
 extracted from the server (the same C library behind the Ruby `pg_query` gem), shipped
 here as a bundled **pure-WASM** parser. No Python, no database, nothing to install.
 
-Four layers of feedback:
+Five layers of feedback:
 0. **psql layer** (`src/psql.ts`) — meta-command lines (`\d`, `\dt staff`, `\c`,
    `\timing`) and pasted prompts (`sd42=# `) are blanked out before parsing, offsets
    preserved. Unknown/mistyped meta-commands are errors with hints (`\q;`, `\D`,
@@ -29,7 +29,9 @@ Four layers of feedback:
    error per block; the parser stops at the first).
 2. **Heuristic hints** — trailing comma before `FROM`, keyword typos (`SELEC` →
    "Did you mean SELECT?"), unclosed parens, reserved words as table names.
-3. **Style suggestions** (blue squiggles, never red, prefixed "Suggestion:") — keyword
+3. **Format SQL blocks** (0.4.0) — command + Markdown document formatter; applies the
+   safe style fixes to every parsing block, nothing more (`applyFixes` in `rules.ts`).
+4. **Style suggestions** (blue squiggles, never red, prefixed "Suggestion:") — keyword
    case, terminating semicolons, optionally `SELECT *` (off by default since 0.3.1). Defaults follow
    [sqlstyle.guide](https://www.sqlstyle.guide); each rule is configurable or off, with
    one-click lightbulb fixes. House style can be committed per-workspace via
@@ -51,7 +53,7 @@ so Mihai built it.
   suggestions).
 - Dependency: `libpg-query@17.7.3` (WASM PostgreSQL parser).
 - Scripts: `npm run compile` / `watch` / `test` (`npm run compile && node test/run.js`).
-- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.3.1); the Marketplace is the artifact store.
+- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.4.0); the Marketplace is the artifact store.
 
 ## Settings
 

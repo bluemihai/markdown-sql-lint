@@ -51,6 +51,22 @@ const CASE_KEYWORDS = new Set([
   'NUMERIC', 'DECIMAL', 'VARCHAR', 'CASCADE', 'IF', 'USING',
 ]);
 
+/**
+ * Apply every finding's fix to `sql`, right to left so earlier offsets stay
+ * valid. This is what "Format SQL blocks" does — only the safe, one-click
+ * fixes, never a reflow of the SQL itself.
+ */
+export function applyFixes(sql: string, findings: StyleFinding[]): string {
+  const fixes = findings
+    .filter((f): f is StyleFinding & { fix: NonNullable<StyleFinding['fix']> } => f.fix !== undefined)
+    .sort((a, b) => b.fix.offset - a.fix.offset);
+  let out = sql;
+  for (const { fix } of fixes) {
+    out = out.slice(0, fix.offset) + fix.newText + out.slice(fix.offset + fix.length);
+  }
+  return out;
+}
+
 export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
   const findings: StyleFinding[] = [];
   const stripped = stripLiterals(sql);

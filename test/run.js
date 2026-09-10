@@ -6,7 +6,7 @@
 const assert = require('node:assert');
 const { extractSqlFences, offsetToPosition, tokenLengthAt } = require('../out/fences');
 const { hintFor, tokenFromMessage } = require('../out/hints');
-const { checkStyle, DEFAULT_STYLE } = require('../out/rules');
+const { checkStyle, applyFixes, DEFAULT_STYLE } = require('../out/rules');
 const { splitPsql, isKnownMetaCommand } = require('../out/psql');
 const { parse, SqlError } = require('libpg-query');
 
@@ -257,6 +257,26 @@ function test(name, fn) {
         assert.deepStrictEqual(checkStyle(sql, DEFAULT_STYLE), []);
       }
     }
+  });
+
+  await test('format: applies keyword case and semicolon fixes, leaves the rest verbatim', () => {
+    const sql = 'select id,\n       name -- the name\nfrom   agent\nwhere id > 1';
+    const out = applyFixes(sql, checkStyle(sql, DEFAULT_STYLE));
+    assert.strictEqual(out, 'SELECT id,\n       name -- the name\nFROM   agent\nWHERE id > 1;');
+    assert.strictEqual(applyFixes(out, checkStyle(out, DEFAULT_STYLE)), out, 'idempotent');
+  });
+
+  await test('format: honours the configured style', () => {
+    const sql = 'SELECT id FROM agent';
+    const lower = { keywordCase: 'lower', requireSemicolon: false, discourageSelectStar: false };
+    assert.strictEqual(applyFixes(sql, checkStyle(sql, lower)), 'select id from agent');
+  });
+
+  await test('format: psql lines survive formatting of the SQL around them', () => {
+    const block = '\\d agent\nselect id from agent\n\\dt';
+    const { sql } = splitPsql(block, 'check');
+    const out = applyFixes(block, checkStyle(sql, DEFAULT_STYLE));
+    assert.strictEqual(out, '\\d agent\nSELECT id FROM agent;\n\\dt');
   });
 
   console.log(`\n${passed} test(s) passed${process.exitCode ? ', with failures' : ''}`);
