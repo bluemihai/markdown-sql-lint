@@ -51,7 +51,7 @@ so Mihai built it.
   suggestions).
 - Dependency: `libpg-query@17.7.3` (WASM PostgreSQL parser).
 - Scripts: `npm run compile` / `watch` / `test` (`npm run compile && node test/run.js`).
-- Packaged `.vsix` artifacts checked in (0.1.0 → 0.3.0).
+- Packaged `.vsix` artifacts sit in the folder but are gitignored (0.1.0 → 0.3.0); the Marketplace is the artifact store.
 
 ## Settings
 
