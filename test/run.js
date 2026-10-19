@@ -184,8 +184,44 @@ function test(name, fn) {
     assert.strictEqual(stars('SELECT COUNT(*) FROM users;').length, 0);
   });
 
+  await test('style: ON on its own line is flagged, with a fix that joins the lines', () => {
+    const joins = (sql) => checkStyle(sql, DEFAULT_STYLE).filter((f) => f.ruleId === 'join-on-same-line');
+    const sql = 'SELECT a.id\nFROM agent a\nJOIN team t\n  ON t.id = a.team_id;';
+    const [f] = joins(sql);
+    assert.ok(f, 'flagged');
+    assert.strictEqual(sql.slice(f.offset, f.offset + f.length), 'ON');
+    assert.match(f.message, /^Suggestion: keep JOIN and its ON on the same line/);
+    assert.strictEqual(applyFixes(sql, [f]), 'SELECT a.id\nFROM agent a\nJOIN team t ON t.id = a.team_id;');
+    // Lowercase keywords and the line break are fixed together without clashing.
+    const lower = 'select a.id\nfrom agent a\nleft join team as t\non t.id = a.team_id';
+    const out = applyFixes(lower, checkStyle(lower, DEFAULT_STYLE));
+    assert.strictEqual(out, 'SELECT a.id\nFROM agent a\nLEFT JOIN team AS t ON t.id = a.team_id;');
+    assert.strictEqual(applyFixes(out, checkStyle(out, DEFAULT_STYLE)), out, 'idempotent');
+    // Two joins, one broken: only that one is flagged.
+    const two = 'SELECT 1\nFROM a\nJOIN b ON b.a = a.id\nJOIN c\nON c.b = b.id;';
+    assert.strictEqual(joins(two).length, 1);
+    assert.strictEqual(applyFixes(two, joins(two)), 'SELECT 1\nFROM a\nJOIN b ON b.a = a.id\nJOIN c ON c.b = b.id;');
+  });
+
+  await test('style: JOIN … ON leaves same-line, USING, CROSS JOIN, subqueries and comments alone', () => {
+    const joins = (sql) => checkStyle(sql, DEFAULT_STYLE).filter((f) => f.ruleId === 'join-on-same-line');
+    assert.deepStrictEqual(joins('SELECT 1 FROM a JOIN b ON b.a = a.id;'), []);
+    assert.deepStrictEqual(joins('SELECT 1\nFROM a\nJOIN b\nUSING (id);'), []);
+    assert.deepStrictEqual(joins('SELECT 1\nFROM a\nCROSS JOIN b\nWHERE a.x > 1;'), []);
+    assert.deepStrictEqual(joins('SELECT 1\nFROM a\nJOIN (\n  SELECT id FROM b\n) s\nON s.id = a.id;'), []);
+    assert.deepStrictEqual(joins("SELECT 1 FROM a JOIN b ON b.n = 'on\\nthe line';"), []);
+    // A comment between JOIN and ON: flagged, but no fix (joining would swallow ON into the comment).
+    const commented = 'SELECT 1\nFROM a\nJOIN b -- teams\nON b.a = a.id;';
+    const [f] = joins(commented);
+    assert.ok(f);
+    assert.strictEqual(f.fix, undefined);
+    assert.deepStrictEqual(joins('SELECT 1\nFROM a\nJOIN b\nON b.a = a.id;'.toLowerCase()).length, 1);
+    const off = { ...DEFAULT_STYLE, joinOnSameLine: false };
+    assert.deepStrictEqual(checkStyle('SELECT 1\nFROM a\nJOIN b\nON b.a = a.id;', off), []);
+  });
+
   await test('style: rules can be switched off', () => {
-    const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false };
+    const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false, joinOnSameLine: false };
     assert.deepStrictEqual(checkStyle('select * from users', off), []);
   });
 

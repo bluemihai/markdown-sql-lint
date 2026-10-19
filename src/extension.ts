@@ -30,6 +30,7 @@ function config() {
       keywordCase: cfg.get<string>('rules.keywordCase', DEFAULT_STYLE.keywordCase),
       requireSemicolon: cfg.get<boolean>('rules.requireSemicolon', DEFAULT_STYLE.requireSemicolon),
       discourageSelectStar: cfg.get<boolean>('rules.discourageSelectStar', DEFAULT_STYLE.discourageSelectStar),
+      joinOnSameLine: cfg.get<boolean>('rules.joinOnSameLine', DEFAULT_STYLE.joinOnSameLine),
     },
   };
 }

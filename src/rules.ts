@@ -1,6 +1,7 @@
 /**
  * Style rules — formatting suggestions beyond syntax errors. Defaults follow
- * https://www.sqlstyle.guide (minus its "river" alignment). Pure module,
+ * https://www.sqlstyle.guide (minus its "river" alignment, and with JOIN … ON
+ * kept on one line where the guide breaks before ON). Pure module,
  * unit-testable; severity and quick-fix wiring live in extension.ts.
  *
  * Design principle (see CONTRIBUTING.md): no false positives. A rule that
@@ -14,12 +15,14 @@ export interface StyleConfig {
   keywordCase: string;
   requireSemicolon: boolean;
   discourageSelectStar: boolean;
+  joinOnSameLine: boolean;
 }
 
 export const DEFAULT_STYLE: StyleConfig = {
   keywordCase: 'upper',
   requireSemicolon: true,
   discourageSelectStar: false,
+  joinOnSameLine: true,
 };
 
 export interface StyleFinding {
@@ -121,6 +124,41 @@ export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
         ruleId: 'require-semicolon',
         fix: { offset: at + 1, length: 0, newText: ';', title: 'Add terminating semicolon' },
       });
+    }
+  }
+
+  if (config.joinOnSameLine) {
+    const join = /\bJOIN\b/gi;
+    // The first of these after JOIN decides: ON → check it; anything else
+    // (USING, CROSS/NATURAL JOIN running into WHERE, a subquery's paren, the
+    // next JOIN) → not this rule's business.
+    const next = /\b(?:ON|USING|JOIN|WHERE|GROUP|ORDER|HAVING|LIMIT|UNION|SELECT)\b|[();]/gi;
+    let m;
+    while ((m = join.exec(stripped)) !== null) {
+      const joinEnd = m.index + m[0].length;
+      next.lastIndex = joinEnd;
+      const n = next.exec(stripped);
+      if (!n || n[0].toUpperCase() !== 'ON') {
+        continue;
+      }
+      const segment = sql.slice(joinEnd, n.index);
+      if (!segment.includes('\n')) {
+        continue;
+      }
+      const finding: StyleFinding = {
+        offset: n.index,
+        length: 2,
+        message: 'Suggestion: keep JOIN and its ON on the same line.',
+        ruleId: 'join-on-same-line',
+      };
+      // Fix only the simple case: one line break, no comment that the join
+      // would swallow. Touching only whitespace keeps it clear of keyword fixes.
+      const breaks = [...segment.matchAll(/[ \t]*\n\s*/g)];
+      if (breaks.length === 1 && !/--|\/\*/.test(segment)) {
+        const at = joinEnd + breaks[0].index!;
+        finding.fix = { offset: at, length: breaks[0][0].length, newText: ' ', title: 'Join the ON line to the JOIN line' };
+      }
+      findings.push(finding);
     }
   }
 

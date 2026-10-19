@@ -32,7 +32,8 @@ Five layers of feedback:
 3. **Format SQL blocks** (0.4.0) — command + Markdown document formatter; applies the
    safe style fixes to every parsing block, nothing more (`applyFixes` in `rules.ts`).
 4. **Style suggestions** (blue squiggles, never red, prefixed "Suggestion:") — keyword
-   case, terminating semicolons, optionally `SELECT *` (off by default since 0.3.1). Defaults follow
+   case, terminating semicolons, `JOIN … ON` on one line (0.5.0), optionally `SELECT *` (off by
+   default since 0.3.1). Defaults follow
    [sqlstyle.guide](https://www.sqlstyle.guide); each rule is configurable or off, with
    one-click lightbulb fixes. House style can be committed per-workspace via
    `.vscode/settings.json`, like a `.rubocop.yml`.
@@ -66,6 +67,7 @@ so Mihai built it.
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
 | `markdownSqlLint.rules.discourageSelectStar` | `false` | Suggest explicit columns over `SELECT *` (opt-in) |
+| `markdownSqlLint.rules.joinOnSameLine` | `true` | Suggest `JOIN … ON` on one line |
 
 ## Scope (by design, for now)
 

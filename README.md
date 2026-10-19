@@ -31,12 +31,14 @@ This extension fills that gap.
   typos (`SELEC` → "Did you mean SELECT?"), unclosed parentheses, reserved words used
   as table names
 - **Style suggestions** (blue squiggles, clearly worded as suggestions — never errors):
-  keyword capitalization, terminating semicolons, optionally `SELECT *`. Defaults follow
+  keyword capitalization, terminating semicolons, `JOIN … ON` on one line, optionally
+  `SELECT *`. Defaults follow
   [sqlstyle.guide](https://www.sqlstyle.guide); every rule is configurable or can be
   switched off, and safe fixes are offered as one-click lightbulb actions
 - **Format SQL blocks** — the command palette entry *Markdown SQL Lint: Format SQL blocks*,
   also registered as a Markdown formatter so *Format Document* (⇧⌥F) works. It applies
-  every safe style fix (keyword case, terminating semicolons) to each SQL block that
+  every safe style fix (keyword case, terminating semicolons, joining an `ON` line to
+  its `JOIN`) to each SQL block that
   parses, and touches nothing else: no reflow, no changes outside the fences, blocks
   with a syntax error left alone
 - Multi-statement blocks supported
@@ -54,6 +56,7 @@ This extension fills that gap.
 | `markdownSqlLint.rules.keywordCase` | `"upper"` | Suggest `upper`/`lower` keyword case, or `off` |
 | `markdownSqlLint.rules.requireSemicolon` | `true` | Suggest terminating semicolons |
 | `markdownSqlLint.rules.discourageSelectStar` | `false` | Suggest listing columns instead of `SELECT *` (opt-in: `SELECT *` is normal while exploring) |
+| `markdownSqlLint.rules.joinOnSameLine` | `true` | Suggest keeping a `JOIN` and its `ON` on the same line |
 
 Style rules are *suggestions by design*: they render as blue info squiggles (never red),
 their messages start with "Suggestion:", and they only appear on blocks that already
