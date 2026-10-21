@@ -9,10 +9,11 @@
 # Auth: needs an Azure DevOps Personal Access Token for the MB42 publisher.
 #   export VSCE_PAT=xxxx   ./publish.sh
 #   ./publish.sh xxxx                  # PAT as first arg
+#   else VSCE_PAT=xxxx from ~/.config/vsce/.env (or the file in $VSCE_ENV)
 #
 # Optional:
 #   ./publish.sh --tag                 # also create+push git tag vX.Y.Z after publish
-#   ./publish.sh xxxx --tag
+#   ./publish.sh --yes                 # no "Proceed?" prompt
 #
 set -euo pipefail
 
@@ -20,18 +21,24 @@ cd "$(dirname "$0")"
 
 # --- args ---------------------------------------------------------------------
 TAG=0
+YES=0
 PAT="${VSCE_PAT:-}"
 for arg in "$@"; do
   case "$arg" in
     --tag) TAG=1 ;;
+    --yes) YES=1 ;;
     -*)    echo "Unknown flag: $arg" >&2; exit 2 ;;
     *)     PAT="$arg" ;;
   esac
 done
 
+ENV_FILE="${VSCE_ENV:-$HOME/.config/vsce/.env}"
+if [[ -z "$PAT" && -f "$ENV_FILE" ]]; then
+  PAT="$(sed -n 's/^VSCE_PAT=//p' "$ENV_FILE" | head -1)"
+fi
+
 if [[ -z "$PAT" ]]; then
-  echo "No PAT. Set VSCE_PAT or pass it as the first argument." >&2
-  echo "  export VSCE_PAT=xxxx && ./publish.sh   (or)   ./publish.sh xxxx" >&2
+  echo "No PAT. Put VSCE_PAT=xxxx in $ENV_FILE, set VSCE_PAT, or pass it as the first argument." >&2
   exit 1
 fi
 
@@ -50,8 +57,10 @@ fi
 # --- confirm (publishing is public + hard to undo) ----------------------------
 echo
 echo "About to publish $VSIX as publisher MB42 to the VS Code Marketplace."
-read -r -p "Proceed? [y/N] " reply
-[[ "$reply" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+if [[ "$YES" != "1" ]]; then
+  read -r -p "Proceed? [y/N] " reply
+  [[ "$reply" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+fi
 
 # --- publish ------------------------------------------------------------------
 npx -y @vscode/vsce publish --packagePath "$VSIX" -p "$PAT"
