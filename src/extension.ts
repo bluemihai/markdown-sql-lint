@@ -31,6 +31,7 @@ function config() {
       requireSemicolon: cfg.get<boolean>('rules.requireSemicolon', DEFAULT_STYLE.requireSemicolon),
       discourageSelectStar: cfg.get<boolean>('rules.discourageSelectStar', DEFAULT_STYLE.discourageSelectStar),
       joinOnSameLine: cfg.get<boolean>('rules.joinOnSameLine', DEFAULT_STYLE.joinOnSameLine),
+      qualifyColumnsInSubqueries: cfg.get<boolean>('rules.qualifyColumnsInSubqueries', DEFAULT_STYLE.qualifyColumnsInSubqueries),
     },
   };
 }
@@ -65,10 +66,10 @@ async function lintDocument(doc: vscode.TextDocument): Promise<void> {
       continue;
     }
     try {
-      await parse(sql);
+      const tree = await parse(sql);
       // Style suggestions only for blocks that parse — a block with a syntax
       // error should show exactly one problem: the error.
-      for (const finding of checkStyle(sql, style)) {
+      for (const finding of checkStyle(sql, style, tree)) {
         found.push(toStyleDiagnostic(finding, sql, fence.startLine, fixes));
       }
     } catch (e) {

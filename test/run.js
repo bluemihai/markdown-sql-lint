@@ -220,6 +220,38 @@ function test(name, fn) {
     assert.deepStrictEqual(checkStyle('SELECT 1\nFROM a\nJOIN b\nON b.a = a.id;', off), []);
   });
 
+  await test('style: bare columns inside a subquery are flagged, one finding each, at the column', async () => {
+    // A real student bug: staff has no staff_id, so the inner staff_id resolves to
+    // payment.staff_id, the filter keeps every row, and PostgreSQL says nothing.
+    const sql = "SELECT DISTINCT customer_id FROM payment WHERE staff_id = (SELECT staff_id FROM staff WHERE first_name = 'Mike' AND last_name = 'Hillyer') ORDER BY customer_id";
+    const findings = checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    assert.deepStrictEqual(findings.map((f) => sql.slice(f.offset, f.offset + f.length)), ['staff_id', 'first_name', 'last_name']);
+    assert.strictEqual(findings[0].offset, sql.indexOf('(SELECT staff_id') + '(SELECT '.length);
+    assert.match(findings[0].message, /^Suggestion: qualify `staff_id` with its table \(staff\.staff_id or an alias\): inside a subquery a bare column name resolves to the OUTER query's column/);
+    assert.match(findings[1].message, /qualify `first_name`/);
+    assert.strictEqual(findings[0].fix, undefined);
+  });
+
+  await test('style: qualified subquery columns, no subquery, correlated EXISTS, and the switch', async () => {
+    const rule = async (sql, config = DEFAULT_STYLE) =>
+      checkStyle(sql, config, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    const fixed = "SELECT DISTINCT customer_id FROM payment WHERE staff_id = (SELECT s.id FROM staff s WHERE s.first_name = 'Mike' AND s.last_name = 'Hillyer') ORDER BY customer_id";
+    assert.deepStrictEqual(await rule(fixed), []);
+    assert.deepStrictEqual(await rule('SELECT id, name FROM customer WHERE id > 10 ORDER BY name;'), []);
+    assert.deepStrictEqual(await rule('SELECT c.id FROM customer c WHERE NOT EXISTS (SELECT 1 FROM rental r WHERE r.customer_id = c.id)'), []);
+    const joey = "SELECT DISTINCT customer_id FROM payment WHERE staff_id = (SELECT staff_id FROM staff WHERE first_name = 'Mike' AND last_name = 'Hillyer')";
+    assert.deepStrictEqual(await rule(joey, { ...DEFAULT_STYLE, qualifyColumnsInSubqueries: false }), []);
+    assert.deepStrictEqual(await rule(joey, DEFAULT_STYLE).then((f) => f.length), 3, 'on by default');
+    assert.deepStrictEqual(checkStyle(joey, DEFAULT_STYLE).filter((f) => f.ruleId === 'qualify-in-subquery'), [], 'needs the parse tree');
+    // Alias in the subquery: the hint names the alias; a derived table in FROM is not flagged; nesting flags each level.
+    const aliased = await rule("SELECT id FROM payment WHERE staff_id IN (SELECT id FROM staff s WHERE first_name = 'Mike')");
+    assert.deepStrictEqual(aliased.map((f) => f.message.match(/\((.*?)\):/)[1]), ['s.id', 's.first_name']);
+    assert.deepStrictEqual(await rule('SELECT d.n FROM (SELECT count(*) AS n, staff_id FROM payment GROUP BY staff_id) d WHERE d.n > 1'), []);
+    const nested = await rule('SELECT id FROM a WHERE x IN (SELECT y FROM b WHERE z = (SELECT w FROM c))');
+    assert.deepStrictEqual(nested.map((f) => f.message.match(/qualify `(\w+)`/)[1]), ['y', 'z', 'w']);
+    assert.deepStrictEqual(await rule('SELECT * FROM a WHERE x IN (SELECT * FROM b)'), [], 'star is not a column');
+  });
+
   await test('style: rules can be switched off', () => {
     const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false, joinOnSameLine: false };
     assert.deepStrictEqual(checkStyle('select * from users', off), []);

@@ -16,6 +16,7 @@ export interface StyleConfig {
   requireSemicolon: boolean;
   discourageSelectStar: boolean;
   joinOnSameLine: boolean;
+  qualifyColumnsInSubqueries: boolean;
 }
 
 export const DEFAULT_STYLE: StyleConfig = {
@@ -23,7 +24,11 @@ export const DEFAULT_STYLE: StyleConfig = {
   requireSemicolon: true,
   discourageSelectStar: false,
   joinOnSameLine: true,
+  qualifyColumnsInSubqueries: true,
 };
+
+/** A libpg-query parse result (`await parse(sql)`), walked as plain JSON. */
+export type ParseTree = { stmts?: unknown[] } | undefined;
 
 export interface StyleFinding {
   /** 0-based character offset into the block's SQL. */
@@ -83,7 +88,12 @@ function maskComments(sql: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length));
 }
 
-export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
+/**
+ * Style check. Token-level rules need only `sql`; the AST rule
+ * (qualify-in-subquery) runs only when the caller also passes the parse
+ * tree, since parsing is async and callers already have it in hand.
+ */
+export function checkStyle(sql: string, config: StyleConfig, tree?: ParseTree): StyleFinding[] {
   const findings: StyleFinding[] = [];
   const stripped = stripLiterals(sql);
 
@@ -177,5 +187,112 @@ export function checkStyle(sql: string, config: StyleConfig): StyleFinding[] {
     }
   }
 
+  if (config.qualifyColumnsInSubqueries && tree) {
+    findings.push(...checkSubqueryQualification(sql, tree));
+  }
+
   return findings;
+}
+
+type AstNode = Record<string, any>;
+
+/**
+ * Bare column names inside a subquery (a SubLink's subselect: `= (SELECT …)`,
+ * `IN (SELECT …)`, `EXISTS (SELECT …)`) of a query that has its own FROM.
+ * `WHERE staff_id = (SELECT staff_id FROM staff …)` runs without an error when
+ * `staff` has no `staff_id`: the bare name falls through to the outer query's
+ * column, the filter keeps every row, and nobody sees a message. A parser can't
+ * know the schema, so the rule flags the shape; qualifying the name turns the
+ * silent fall-through into a real error. Applied at every nesting level; a
+ * derived table in FROM is not a SubLink and is left alone.
+ */
+function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[] {
+  const findings: StyleFinding[] = [];
+  const toCharOffset = byteToCharOffset(sql);
+
+  const flagColumn = (ref: AstNode, table: TableHint | undefined) => {
+    const fields: AstNode[] = ref.fields ?? [];
+    if (fields.length !== 1 || !fields[0].String || typeof ref.location !== 'number' || ref.location < 0) {
+      return; // `t.col` / `t.*` are qualified; `*` is not a column
+    }
+    const col: string = fields[0].String.sval;
+    const offset = toCharOffset(ref.location);
+    const token = sql.slice(offset).match(/^"(?:[^"]|"")*"|^[A-Za-z_][A-Za-z0-9_$]*/);
+    const hint = table === undefined ? `table.${col} or an alias` : table.isAlias ? `${table.name}.${col}` : `${table.name}.${col} or an alias`;
+    findings.push({
+      offset,
+      length: token ? token[0].length : col.length,
+      message: `Suggestion: qualify \`${col}\` with its table (${hint}): inside a subquery a bare column name resolves to the OUTER query's column when the inner table has no such column, and the query runs without an error.`,
+      ruleId: 'qualify-in-subquery',
+      // no auto-fix: only the author knows which table the column was meant to come from
+    });
+  };
+
+  // `scope.select` is the SelectStmt we are inside; `scope.flag` says whether
+  // its bare columns are suspects (it is a SubLink subselect of a query that has
+  // a FROM). Every SelectStmt opens its own scope, so nesting works per level.
+  const visit = (node: unknown, scope: { select?: AstNode; flag: boolean; table?: TableHint }): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, scope);
+      }
+      return;
+    }
+    if (node === null || typeof node !== 'object') {
+      return;
+    }
+    const n = node as AstNode;
+    if (n.ColumnRef) {
+      if (scope.flag) {
+        flagColumn(n.ColumnRef, scope.table);
+      }
+      return;
+    }
+    if (n.SubLink) {
+      visit(n.SubLink.testexpr, scope);
+      const sub: AstNode | undefined = n.SubLink.subselect?.SelectStmt;
+      if (sub) {
+        const outerHasFrom = Array.isArray(scope.select?.fromClause) && scope.select!.fromClause.length > 0;
+        visit(sub, { select: sub, flag: outerHasFrom, table: singleTable(sub) });
+      }
+      return;
+    }
+    if (n.SelectStmt) {
+      // A new scope that is not a SubLink subselect (top level, derived table in
+      // FROM, CTE, UNION arm): its own bare columns are fine.
+      visit(n.SelectStmt, { select: n.SelectStmt, flag: false });
+      return;
+    }
+    for (const key of Object.keys(n)) {
+      visit(n[key], scope);
+    }
+  };
+
+  visit(tree?.stmts ?? [], { flag: false });
+  return findings;
+}
+
+interface TableHint {
+  name: string;
+  isAlias: boolean;
+}
+
+/** The one table a subselect reads from, as the name to qualify with (its alias when it has one); undefined when the FROM is not that simple. */
+function singleTable(select: AstNode): TableHint | undefined {
+  const from: AstNode[] = select.fromClause ?? [];
+  if (from.length !== 1 || !from[0].RangeVar) {
+    return undefined;
+  }
+  const rv = from[0].RangeVar;
+  return rv.alias?.aliasname ? { name: rv.alias.aliasname, isAlias: true } : { name: rv.relname, isAlias: false };
+}
+
+/** libpg-query locations are UTF-8 byte offsets; findings are character offsets. */
+function byteToCharOffset(sql: string): (byteOffset: number) => number {
+  // eslint-disable-next-line no-control-regex
+  if (!/[^\x00-\x7f]/.test(sql)) {
+    return (b) => b;
+  }
+  const bytes = Buffer.from(sql, 'utf8');
+  return (b) => bytes.subarray(0, Math.min(b, bytes.length)).toString('utf8').length;
 }

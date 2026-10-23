@@ -104,6 +104,11 @@
           "type": "boolean",
           "default": true,
           "description": "Suggest keeping a JOIN and its ON condition on the same line."
+        },
+        "markdownSqlLint.rules.qualifyColumnsInSubqueries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suggest qualifying bare column names inside a subquery (= (SELECT …), IN (SELECT …), EXISTS (SELECT …)) with their table or an alias: a bare name the inner table lacks silently resolves to the OUTER query's column, and the query runs without an error."
         }
       }
     }
