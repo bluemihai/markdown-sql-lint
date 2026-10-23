@@ -191,7 +191,69 @@ export function checkStyle(sql: string, config: StyleConfig, tree?: ParseTree): 
     findings.push(...checkSubqueryQualification(sql, tree));
   }
 
-  return findings;
+  return applyNoqa(sql, findings);
+}
+
+/** Every style rule id, as written in a `-- noqa: <rule-id>` comment. */
+export const RULE_IDS = ['keyword-case', 'require-semicolon', 'join-on-same-line', 'select-star', 'qualify-in-subquery'] as const;
+
+/**
+ * Per-line suppression: a `-- noqa: rule-a, rule-b` (or `/* noqa … *\/`) comment
+ * drops the named rules' findings on its line; a bare `noqa` drops every
+ * style finding on that line. Only style findings pass through here, so a
+ * parse error can never be silenced. One left-to-right scan over literals,
+ * quoted identifiers and comments keeps a `-- noqa` inside a string literal
+ * from counting (and an apostrophe inside a comment from opening a literal).
+ */
+function applyNoqa(sql: string, findings: StyleFinding[]): StyleFinding[] {
+  if (!/noqa/i.test(sql)) {
+    return findings;
+  }
+  const byLine = new Map<number, Set<string> | 'all'>();
+  const token = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\*[\s\S]*?\*\//g;
+  const noqa = /\bnoqa\b(?:\s*:\s*([A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*))?/i;
+  let m;
+  while ((m = token.exec(sql)) !== null) {
+    if (!m[0].startsWith('--') && !m[0].startsWith('/*')) {
+      continue;
+    }
+    const found = noqa.exec(m[0]);
+    if (!found) {
+      continue;
+    }
+    const line = lineOf(sql, m.index);
+    if (!found[1]) {
+      byLine.set(line, 'all');
+      continue;
+    }
+    const current = byLine.get(line);
+    if (current === 'all') {
+      continue;
+    }
+    const rules = current ?? new Set<string>();
+    for (const id of found[1].split(',')) {
+      rules.add(id.trim().toLowerCase());
+    }
+    byLine.set(line, rules);
+  }
+  if (byLine.size === 0) {
+    return findings;
+  }
+  return findings.filter((f) => {
+    const rules = byLine.get(lineOf(sql, f.offset));
+    return !(rules === 'all' || rules?.has(f.ruleId));
+  });
+}
+
+/** 0-based line of a character offset into `sql`. */
+function lineOf(sql: string, offset: number): number {
+  let line = 0;
+  for (let i = 0; i < offset && i < sql.length; i++) {
+    if (sql.charCodeAt(i) === 10) {
+      line++;
+    }
+  }
+  return line;
 }
 
 type AstNode = Record<string, any>;

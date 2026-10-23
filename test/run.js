@@ -253,6 +253,46 @@ function test(name, fn) {
     assert.deepStrictEqual(await rule('SELECT * FROM a WHERE x IN (SELECT * FROM b)'), [], 'star is not a column');
   });
 
+  await test('noqa: `-- noqa: qualify-in-subquery` silences that rule on its line only', async () => {
+    // Joey's 4.3 with the inner table on its own line: the staff_id finding goes, the next line's stay.
+    const sql = [
+      'SELECT DISTINCT customer_id',
+      'FROM payment',
+      'WHERE staff_id = (SELECT staff_id FROM staff  -- noqa: qualify-in-subquery',
+      "                  WHERE first_name = 'Mike' AND last_name = 'Hillyer')",
+      'ORDER BY customer_id;',
+    ].join('\n');
+    const findings = checkStyle(sql, DEFAULT_STYLE, await parse(sql));
+    assert.deepStrictEqual(findings.map((f) => sql.slice(f.offset, f.offset + f.length)), ['first_name', 'last_name']);
+    assert.ok(findings.every((f) => f.ruleId === 'qualify-in-subquery'));
+    // Without the comment all three are flagged.
+    const plain = sql.replace('  -- noqa: qualify-in-subquery', '');
+    assert.strictEqual(checkStyle(plain, DEFAULT_STYLE, await parse(plain)).length, 3);
+  });
+
+  await test('noqa: bare `-- noqa` silences every style rule on its line, other lines untouched', () => {
+    const sql = 'select id\nfrom users -- noqa';
+    const findings = checkStyle(sql, DEFAULT_STYLE);
+    assert.deepStrictEqual(findings.map((f) => [f.ruleId, sql.slice(f.offset, f.offset + f.length)]), [['keyword-case', 'select']]);
+    // Case-insensitive, spaces around the colon optional, several rules, block comments too.
+    assert.deepStrictEqual(checkStyle('select id from users; -- NOQA:keyword-case', DEFAULT_STYLE), []);
+    assert.deepStrictEqual(checkStyle('select id from users -- noqa: keyword-case , require-semicolon', DEFAULT_STYLE), []);
+    assert.deepStrictEqual(checkStyle('select id from users; /* noqa */', DEFAULT_STYLE), []);
+    // Format honours it: a suppressed finding has no fix to apply.
+    assert.strictEqual(applyFixes(sql, findings), 'SELECT id\nfrom users -- noqa');
+  });
+
+  await test('noqa: names only the rule it names, and a noqa inside a string literal is not a noqa', async () => {
+    const sql = 'SELECT id FROM payment WHERE staff_id IN (SELECT id FROM staff) -- noqa: select-star';
+    const findings = checkStyle(sql, { ...DEFAULT_STYLE, discourageSelectStar: true }, await parse(sql));
+    assert.deepStrictEqual(findings.map((f) => f.ruleId), ['require-semicolon', 'qualify-in-subquery']);
+    const literal = "SELECT 'x -- noqa' AS a from t;";
+    assert.deepStrictEqual(checkStyle(literal, DEFAULT_STYLE).map((f) => f.ruleId), ['keyword-case']);
+    // An apostrophe inside a comment does not open a literal that would hide a later noqa.
+    const apostrophe = "SELECT 1 -- it's fine\nfrom t; -- noqa";
+    assert.deepStrictEqual(checkStyle(apostrophe, DEFAULT_STYLE), []);
+  });
+
   await test('style: rules can be switched off', () => {
     const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false, joinOnSameLine: false };
     assert.deepStrictEqual(checkStyle('select * from users', off), []);

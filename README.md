@@ -83,6 +83,28 @@ Like a `.rubocop.yml`, you can commit house style with a project: put the
 `markdownSqlLint.rules.*` keys in the workspace's `.vscode/settings.json` and everyone
 opening that folder gets the same conventions.
 
+### Silencing one line
+
+When a suggestion is right in general but wrong here, end the line with a `noqa` comment —
+ordinary SQL, so the block still runs anywhere:
+
+```sql
+SELECT DISTINCT customer_id
+FROM payment
+WHERE staff_id = (SELECT id FROM staff  -- noqa: qualify-in-subquery
+                  WHERE first_name = 'Mike');
+```
+
+- `-- noqa: <rule-id>` silences that rule's findings on that line; several with commas
+  (`-- noqa: keyword-case, require-semicolon`)
+- bare `-- noqa` silences every style rule on that line
+- `/* noqa: … */` works the same; `noqa` is case-insensitive, and a `noqa` inside a
+  string literal is just text
+- syntax errors are never silenced — only the suggestions are
+
+Rule ids: `keyword-case`, `require-semicolon`, `join-on-same-line`, `select-star`,
+`qualify-in-subquery`.
+
 ## Limitations (by design, for now)
 
 - **Syntax only.** `SELECT * FROM tabel_with_typo` parses fine — the parser can't know
