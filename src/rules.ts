@@ -218,11 +218,13 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
     const col: string = fields[0].String.sval;
     const offset = toCharOffset(ref.location);
     const token = sql.slice(offset).match(/^"(?:[^"]|"")*"|^[A-Za-z_][A-Za-z0-9_$]*/);
-    const hint = table === undefined ? `table.${col} or an alias` : table.isAlias ? `${table.name}.${col}` : `${table.name}.${col} or an alias`;
+    const hint = table === undefined ? `table.${col}, or an alias` : table.isAlias ? `${table.name}.${col}` : `${table.name}.${col}, or an alias`;
+    const owner = table === undefined ? 'the inner table' : `\`${table.name}\``;
+    const article = /^[aeiou]/i.test(col) ? 'an' : 'a';
     findings.push({
       offset,
       length: token ? token[0].length : col.length,
-      message: `Suggestion: qualify \`${col}\` with its table (${hint}): inside a subquery a bare column name resolves to the OUTER query's column when the inner table has no such column, and the query runs without an error.`,
+      message: `Suggestion: \`${col}\` has no table prefix. If ${owner} has ${article} \`${col}\` column this is fine and you can ignore it. If it does not, PostgreSQL silently takes \`${col}\` from the OUTER query instead and the query runs without an error. Prefix it (${hint}) to be sure.`,
       ruleId: 'qualify-in-subquery',
       // no auto-fix: only the author knows which table the column was meant to come from
     });

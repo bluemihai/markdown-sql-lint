@@ -227,8 +227,8 @@ function test(name, fn) {
     const findings = checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
     assert.deepStrictEqual(findings.map((f) => sql.slice(f.offset, f.offset + f.length)), ['staff_id', 'first_name', 'last_name']);
     assert.strictEqual(findings[0].offset, sql.indexOf('(SELECT staff_id') + '(SELECT '.length);
-    assert.match(findings[0].message, /^Suggestion: qualify `staff_id` with its table \(staff\.staff_id or an alias\): inside a subquery a bare column name resolves to the OUTER query's column/);
-    assert.match(findings[1].message, /qualify `first_name`/);
+    assert.strictEqual(findings[0].message, "Suggestion: `staff_id` has no table prefix. If `staff` has a `staff_id` column this is fine and you can ignore it. If it does not, PostgreSQL silently takes `staff_id` from the OUTER query instead and the query runs without an error. Prefix it (staff.staff_id, or an alias) to be sure.");
+    assert.match(findings[1].message, /^Suggestion: `first_name` has no table prefix/);
     assert.strictEqual(findings[0].fix, undefined);
   });
 
@@ -245,10 +245,11 @@ function test(name, fn) {
     assert.deepStrictEqual(checkStyle(joey, DEFAULT_STYLE).filter((f) => f.ruleId === 'qualify-in-subquery'), [], 'needs the parse tree');
     // Alias in the subquery: the hint names the alias; a derived table in FROM is not flagged; nesting flags each level.
     const aliased = await rule("SELECT id FROM payment WHERE staff_id IN (SELECT id FROM staff s WHERE first_name = 'Mike')");
-    assert.deepStrictEqual(aliased.map((f) => f.message.match(/\((.*?)\):/)[1]), ['s.id', 's.first_name']);
+    assert.deepStrictEqual(aliased.map((f) => f.message.match(/Prefix it \((.*?)\) to be sure/)[1]), ['s.id', 's.first_name']);
+    assert.match(aliased[0].message, /If `s` has an `id` column/);
     assert.deepStrictEqual(await rule('SELECT d.n FROM (SELECT count(*) AS n, staff_id FROM payment GROUP BY staff_id) d WHERE d.n > 1'), []);
     const nested = await rule('SELECT id FROM a WHERE x IN (SELECT y FROM b WHERE z = (SELECT w FROM c))');
-    assert.deepStrictEqual(nested.map((f) => f.message.match(/qualify `(\w+)`/)[1]), ['y', 'z', 'w']);
+    assert.deepStrictEqual(nested.map((f) => f.message.match(/^Suggestion: `(\w+)` has no table prefix/)[1]), ['y', 'z', 'w']);
     assert.deepStrictEqual(await rule('SELECT * FROM a WHERE x IN (SELECT * FROM b)'), [], 'star is not a column');
   });
 
