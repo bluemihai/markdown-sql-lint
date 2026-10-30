@@ -15,7 +15,7 @@ The interesting code is small:
   mapping parser offsets to document positions
 - `src/psql.ts` — pure logic: psql meta-commands and prompts, checked against
   psql's own command list (verify additions against a live `psql`, `\?`)
-- `src/hints.ts` — pure logic: heuristic `Hint:` lines for common mistakes
+- `src/hints.ts` — pure logic: heuristic `Hint:` text for common mistakes
 - `src/extension.ts` — VS Code wiring: diagnostics, debouncing, configuration
 - `test/run.js` — the test suite; runs in plain Node, no VS Code required
 

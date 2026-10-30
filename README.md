@@ -27,7 +27,7 @@ This extension fills that gap.
   and set aside before the SQL is parsed. Mistyped ones are flagged against psql's own
   command list: `\q;` ("not terminated with a semicolon"), `\D` ("case-sensitive"),
   `\dstaff` ("use `\d` followed by a space"), `\timeing` ("did you mean `\timing`?")
-- Heuristic `Hint:` lines for common mistakes — trailing comma before `FROM`, keyword
+- A heuristic `Hint:` after the error for common mistakes — trailing comma before `FROM`, keyword
   typos (`SELEC` → "Did you mean SELECT?"), unclosed parentheses, reserved words used
   as table names
 - **Style suggestions** (blue squiggles, clearly worded as suggestions — never errors):

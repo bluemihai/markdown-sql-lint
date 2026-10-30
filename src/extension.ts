@@ -151,7 +151,7 @@ function toDiagnostic(error: SqlError, sql: string, startLine: number): vscode.D
     const token = tokenFromMessage(error.message);
     const hint = token !== undefined ? hintFor(sql, cursor, token) : undefined;
     if (hint) {
-      message += `\nHint: ${hint}`;
+      message += ` Hint: ${hint}`; // same line: inline displays show a \n as a ⏎ glyph
     }
   } else {
     // No position info: flag the first non-empty line of the block.

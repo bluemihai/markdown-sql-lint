@@ -345,20 +345,17 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
     const token = sql.slice(offset).match(/^"(?:[^"]|"")*"|^[A-Za-z_][A-Za-z0-9_$]*/);
     const owner = table === undefined ? "one of the subquery's tables" : `\`${table.name}\``;
     const prefix =
-      table === undefined
-        ? `write it as \`table.${col}\` (the right table or alias)`
-        : table.isAlias
-          ? `write \`${table.name}.${col}\``
-          : `write \`${table.name}.${col}\` (or use an alias)`;
+      table === undefined ? `Write it as \`table.${col}\` (the right table or alias)` : `Write \`${table.name}.${col}\``;
     const article = /^[aeiou]/i.test(col) ? 'an' : 'a';
-    // Three short lines for the hover: what it is (a hint), why it matters, what to do.
+    // One line, like every other rule: inline displays (Error Lens, the Problems panel) show a
+    // \n as a ⏎ glyph (Mihai 2026-10-30: "what are those fake \n's?"). No "use Quick Fix"
+    // sentence: the lightbulb already offers it.
     findings.push({
       offset,
       length: token ? token[0].length : col.length,
       message:
-        `Suggestion, worth a quick check (not an error): \`${col}\` has no table prefix.\n` +
-        `If ${owner} has ${article} \`${col}\` column, this is fine. If not, PostgreSQL silently uses the outer query's \`${col}\` instead, and the query still runs without an error.\n` +
-        `To be sure, ${prefix}. Or, if you know it's fine, ignore this line with Quick Fix (Cmd+. / Ctrl+.).`,
+        `Suggestion: \`${col}\` has no table prefix. Fine if ${owner} has ${article} \`${col}\` column; ` +
+        `if not, PostgreSQL silently uses the outer query's \`${col}\`. ${prefix} to be sure.`,
       ruleId: 'qualify-in-subquery',
       // no auto-fix that qualifies: only the author knows which table the column was meant to come from.
       // The extension offers "Ignore on this line" via noqaEdit instead.
