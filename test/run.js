@@ -335,6 +335,46 @@ function test(name, fn) {
     assert.strictEqual(noqaEdit(literal, (await lint(literal))[0]), undefined);
   });
 
+  await test('qualify quick fix: one-table subquery offers "Qualify as <table>.<col>", which inserts exactly that prefix', async () => {
+    const lint = async (sql) => checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    const apply = (sql, e) => sql.slice(0, e.offset) + e.newText + sql.slice(e.offset + e.length);
+    const sql = 'SELECT title FROM film WHERE film_id IN (SELECT film_id FROM film_category);';
+    const [f] = await lint(sql);
+    assert.strictEqual(f.quickFix.title, 'Qualify as film_category.film_id');
+    const fixed = apply(sql, f.quickFix);
+    assert.strictEqual(fixed, 'SELECT title FROM film WHERE film_id IN (SELECT film_category.film_id FROM film_category);');
+    assert.deepStrictEqual(await lint(fixed), []);
+    // Never applied by Format (applyFixes only takes `fix`).
+    assert.strictEqual(f.fix, undefined);
+    assert.strictEqual(applyFixes(sql, [f]), sql);
+    // An alias the student wrote is used instead of the table name.
+    const aliased = "SELECT title FROM film WHERE length > (SELECT AVG(length) FROM film f2 WHERE rating = 'PG');";
+    const titles = (await lint(aliased)).map((x) => x.quickFix && x.quickFix.title);
+    assert.deepStrictEqual(titles, []); // rule C: film inside and outside, nothing flagged
+    const aliased2 = "SELECT id FROM payment WHERE staff_id IN (SELECT id FROM staff s WHERE first_name = 'Mike');";
+    assert.deepStrictEqual((await lint(aliased2)).map((x) => x.quickFix.title), ['Qualify as s.id', 'Qualify as s.first_name']);
+    assert.strictEqual(
+      (await lint(aliased2)).reduceRight((acc, x) => apply(acc, x.quickFix), aliased2),
+      "SELECT id FROM payment WHERE staff_id IN (SELECT s.id FROM staff s WHERE s.first_name = 'Mike');"
+    );
+    // A quoted table name keeps its quotes (an unquoted prefix would fold to lowercase and miss it).
+    const quoted = 'SELECT id FROM payment WHERE staff_id IN (SELECT id FROM "Staff");';
+    assert.strictEqual((await lint(quoted))[0].quickFix.title, 'Qualify as "Staff".id');
+  });
+
+  await test('qualify quick fix: not offered with a JOIN, several FROM items, or a derived table', async () => {
+    const lint = async (sql) => checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    for (const sql of [
+      'SELECT 1 FROM payment WHERE x IN (SELECT a FROM staff JOIN store ON store.id = staff.store_id);',
+      'SELECT 1 FROM payment WHERE x IN (SELECT a FROM staff, store);',
+      'SELECT 1 FROM payment WHERE x IN (SELECT a FROM (SELECT 1 AS b) d);',
+    ]) {
+      const findings = await lint(sql);
+      assert.ok(findings.length > 0, `flagged: ${sql}`);
+      assert.ok(findings.every((f) => f.quickFix === undefined), `no qualify fix: ${sql}`);
+    }
+  });
+
   await test('narrowing: the statement text proves the inner table has the column, so no finding', async () => {
     const cols = async (sql) =>
       checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery').map((f) => sql.slice(f.offset, f.offset + f.length));

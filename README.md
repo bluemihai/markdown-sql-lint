@@ -74,8 +74,12 @@ shape — every unqualified column inside `= (SELECT …)`, `IN (SELECT …)` or
 `EXISTS (SELECT …)` — because `staff.staff_id` would have produced a real error message.
 This may or may not be a bug: if the inner table does have the column, the query is fine
 and you can ignore the suggestion. The squiggle's Quick Fix (Cmd+. / Ctrl+.) offers
+**Qualify as `staff.staff_id`** when the subquery reads from exactly one table (its alias
+if you wrote one; not offered with a JOIN, several tables or a derived table), and
 **Ignore on this line**, which adds `-- noqa: qualify-in-subquery` to that line (see
-below). Derived tables in `FROM` are left alone.
+below). Qualifying is only right if that table really has the column; if it doesn't, the
+query now fails with "column does not exist", which is the point. Derived tables in `FROM`
+are left alone.
 
 The rule stays quiet when the statement itself shows the column must come from the
 subquery's own tables (no schema is read, only that statement's text):

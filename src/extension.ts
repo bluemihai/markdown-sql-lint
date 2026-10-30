@@ -115,14 +115,18 @@ function toStyleDiagnostic(
       title: finding.fix.title,
     });
   }
+  // Menu order: "Qualify as …" first, then "Ignore on this line".
   const ignore = IGNORABLE_RULES.has(finding.ruleId) ? noqaEdit(sql, finding) : undefined;
-  if (ignore) {
-    const at = offsetToPosition(sql, ignore.offset);
-    const until = offsetToPosition(sql, ignore.offset + ignore.length);
+  for (const edit of [finding.quickFix, ignore]) {
+    if (!edit) {
+      continue;
+    }
+    const at = offsetToPosition(sql, edit.offset);
+    const until = offsetToPosition(sql, edit.offset + edit.length);
     fixes.push({
       range: new vscode.Range(startLine + at.line, at.character, startLine + until.line, until.character),
-      newText: ignore.newText,
-      title: ignore.title,
+      newText: edit.newText,
+      title: edit.title,
       anchor: range,
       diagnostic,
     });

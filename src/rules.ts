@@ -38,6 +38,11 @@ export interface StyleFinding {
   ruleId: string;
   /** Optional one-click fix: replace [offset, offset+length) with newText. */
   fix?: { offset: number; length: number; newText: string; title: string };
+  /**
+   * A fix offered only in the Quick Fix menu, never applied by "Format SQL
+   * blocks" (applyFixes ignores it): it is a guess the student must confirm.
+   */
+  quickFix?: { offset: number; length: number; newText: string; title: string };
 }
 
 /**
@@ -347,18 +352,26 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
     const prefix =
       table === undefined ? `Write it as \`table.${col}\` (the right table or alias)` : `Write \`${table.name}.${col}\``;
     const article = /^[aeiou]/i.test(col) ? 'an' : 'a';
+    const length = token ? token[0].length : col.length;
+    // "Qualify as t.col" only when the subquery's FROM is one plain table, so
+    // there is exactly one prefix that could be meant (Mihai 2026-10-30, "3a yes").
+    // With a JOIN, several FROM items or a derived table, only "Ignore" is offered.
+    const prefixText = table === undefined ? undefined : `${sqlIdentifier(table.name)}.`;
     // One line, like every other rule: inline displays (Error Lens, the Problems panel) show a
     // \n as a ⏎ glyph (Mihai 2026-10-30: "what are those fake \n's?"). No "use Quick Fix"
     // sentence: the lightbulb already offers it.
     findings.push({
       offset,
-      length: token ? token[0].length : col.length,
+      length,
+      ...(prefixText === undefined
+        ? {}
+        : { quickFix: { offset, length: 0, newText: prefixText, title: `Qualify as ${prefixText}${sql.slice(offset, offset + length)}` } }),
       message:
         `Suggestion: \`${col}\` has no table prefix. Fine if ${owner} has ${article} \`${col}\` column; ` +
         `if not, PostgreSQL silently uses the outer query's \`${col}\`. ${prefix} to be sure.`,
       ruleId: 'qualify-in-subquery',
-      // no auto-fix that qualifies: only the author knows which table the column was meant to come from.
-      // The extension offers "Ignore on this line" via noqaEdit instead.
+      // No `fix` (Format must never qualify): only the author knows whether the table has the column.
+      // The extension offers `quickFix` (when set) and "Ignore on this line" via noqaEdit.
     });
   };
 
@@ -640,6 +653,11 @@ function singleTable(select: AstNode): TableHint | undefined {
   }
   const rv = from[0].RangeVar;
   return rv.alias?.aliasname ? { name: rv.alias.aliasname, isAlias: true } : { name: rv.relname, isAlias: false };
+}
+
+/** A parsed (case-folded) name as it must be written back into SQL: quoted unless it is a plain lowercase identifier. */
+function sqlIdentifier(name: string): string {
+  return /^[a-z_][a-z0-9_$]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
 }
 
 /** libpg-query locations are UTF-8 byte offsets; findings are character offsets. */
