@@ -203,6 +203,13 @@ export function checkStyle(sql: string, config: StyleConfig, tree?: ParseTree): 
 export const RULE_IDS = ['keyword-case', 'require-semicolon', 'join-on-same-line', 'select-star', 'qualify-in-subquery'] as const;
 
 /**
+ * Rules whose findings offer "Ignore on this line (-- noqa: <rule-id>)" as a quick
+ * fix, listed after the rule's real fix when it has one. Every rule (Mihai
+ * 2026-10-30: "3b yes", then "3b B" for the three that also have a real fix).
+ */
+export const IGNORABLE_RULES: ReadonlySet<string> = new Set(['qualify-in-subquery', 'select-star', 'keyword-case', 'require-semicolon', 'join-on-same-line']);
+
+/**
  * Per-line suppression: a `-- noqa: rule-a, rule-b` (or `/* noqa … *\/`) comment
  * drops the named rules' findings on its line; a bare `noqa` drops every
  * style finding on that line. Only style findings pass through here, so a

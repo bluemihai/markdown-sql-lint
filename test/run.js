@@ -6,7 +6,7 @@
 const assert = require('node:assert');
 const { extractSqlFences, offsetToPosition, tokenLengthAt } = require('../out/fences');
 const { hintFor, tokenFromMessage } = require('../out/hints');
-const { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE } = require('../out/rules');
+const { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE, IGNORABLE_RULES, RULE_IDS } = require('../out/rules');
 const { splitPsql, isKnownMetaCommand } = require('../out/psql');
 const { parse, SqlError } = require('libpg-query');
 
@@ -372,6 +372,26 @@ function test(name, fn) {
       const findings = await lint(sql);
       assert.ok(findings.length > 0, `flagged: ${sql}`);
       assert.ok(findings.every((f) => f.quickFix === undefined), `no qualify fix: ${sql}`);
+    }
+  });
+
+  await test('ignore quick fix: offered for every style rule, and the noqa it writes silences that finding', () => {
+    assert.deepStrictEqual([...IGNORABLE_RULES].sort(), [...RULE_IDS].sort());
+    const all = { ...DEFAULT_STYLE, discourageSelectStar: true };
+    const apply = (sql, e) => sql.slice(0, e.offset) + e.newText + sql.slice(e.offset + e.length);
+    const cases = [
+      ['select-star', 'SELECT * FROM film;', 'SELECT * FROM film;  -- noqa: select-star'],
+      ['keyword-case', 'select id FROM film;', 'select id FROM film;  -- noqa: keyword-case'],
+      ['require-semicolon', 'SELECT id FROM film', 'SELECT id FROM film  -- noqa: require-semicolon'],
+      ['join-on-same-line', 'SELECT 1\nFROM a\nJOIN b\nON b.a = a.id;', 'SELECT 1\nFROM a\nJOIN b\nON b.a = a.id;  -- noqa: join-on-same-line'],
+    ];
+    for (const [rule, sql, expected] of cases) {
+      const [finding] = checkStyle(sql, all).filter((f) => f.ruleId === rule);
+      const edit = noqaEdit(sql, finding);
+      assert.strictEqual(edit.title, `Ignore on this line (-- noqa: ${rule})`);
+      const fixed = apply(sql, edit);
+      assert.strictEqual(fixed, expected);
+      assert.deepStrictEqual(checkStyle(fixed, all).filter((f) => f.ruleId === rule), [], rule);
     }
   });
 

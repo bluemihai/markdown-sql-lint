@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { parse, SqlError, hasSqlDetails } from 'libpg-query';
 import { extractSqlFences, offsetToPosition, tokenLengthAt } from './fences';
 import { hintFor, tokenFromMessage } from './hints';
-import { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE, StyleFinding } from './rules';
+import { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE, IGNORABLE_RULES, StyleFinding } from './rules';
 import { splitPsql, PsqlFinding, PsqlMode } from './psql';
 
 const SOURCE = 'markdown-sql-lint';
@@ -21,8 +21,6 @@ interface StoredFix {
   diagnostic?: vscode.Diagnostic;
 }
 
-/** Rules whose findings offer "Ignore on this line" (a `-- noqa` comment) as a quick fix. */
-const IGNORABLE_RULES = new Set(['qualify-in-subquery']);
 const quickFixes = new Map<string, StoredFix[]>();
 
 function config() {
@@ -115,7 +113,7 @@ function toStyleDiagnostic(
       title: finding.fix.title,
     });
   }
-  // Menu order: "Qualify as …" first, then "Ignore on this line".
+  // Menu order: the rule's real fix (pushed above), then "Qualify as …", then "Ignore on this line".
   const ignore = IGNORABLE_RULES.has(finding.ruleId) ? noqaEdit(sql, finding) : undefined;
   for (const edit of [finding.quickFix, ignore]) {
     if (!edit) {

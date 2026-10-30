@@ -118,6 +118,8 @@ WHERE staff_id = (SELECT id FROM staff  -- noqa: qualify-in-subquery
 - `/* noqa: … */` works the same; `noqa` is case-insensitive, and a `noqa` inside a
   string literal is just text
 - syntax errors are never silenced — only the suggestions are
+- every suggestion's Quick Fix (Cmd+. / Ctrl+.) offers **Ignore on this line**, which writes
+  the comment for you (listed after the rule's real fix, when it has one)
 
 Rule ids: `keyword-case`, `require-semicolon`, `join-on-same-line`, `select-star`,
 `qualify-in-subquery`.
