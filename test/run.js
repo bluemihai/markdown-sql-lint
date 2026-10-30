@@ -6,7 +6,7 @@
 const assert = require('node:assert');
 const { extractSqlFences, offsetToPosition, tokenLengthAt } = require('../out/fences');
 const { hintFor, tokenFromMessage } = require('../out/hints');
-const { checkStyle, applyFixes, DEFAULT_STYLE } = require('../out/rules');
+const { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE } = require('../out/rules');
 const { splitPsql, isKnownMetaCommand } = require('../out/psql');
 const { parse, SqlError } = require('libpg-query');
 
@@ -227,8 +227,12 @@ function test(name, fn) {
     const findings = checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
     assert.deepStrictEqual(findings.map((f) => sql.slice(f.offset, f.offset + f.length)), ['staff_id', 'first_name', 'last_name']);
     assert.strictEqual(findings[0].offset, sql.indexOf('(SELECT staff_id') + '(SELECT '.length);
-    assert.strictEqual(findings[0].message, "Suggestion: `staff_id` has no table prefix. If `staff` has a `staff_id` column this is fine and you can ignore it. If it does not, PostgreSQL silently takes `staff_id` from the OUTER query instead and the query runs without an error. Prefix it (staff.staff_id, or an alias) to be sure.");
-    assert.match(findings[1].message, /^Suggestion: `first_name` has no table prefix/);
+    assert.strictEqual(findings[0].message, [
+      "Suggestion, worth a quick check (not an error): `staff_id` has no table prefix.",
+      "If `staff` has a `staff_id` column, this is fine. If not, PostgreSQL silently uses the outer query's `staff_id` instead, and the query still runs without an error.",
+      "To be sure, write `staff.staff_id` (or use an alias). Or, if you know it's fine, ignore this line with Quick Fix (Cmd+. / Ctrl+.).",
+    ].join('\n'));
+    assert.match(findings[1].message, /`first_name` has no table prefix/);
     assert.strictEqual(findings[0].fix, undefined);
   });
 
@@ -245,11 +249,11 @@ function test(name, fn) {
     assert.deepStrictEqual(checkStyle(joey, DEFAULT_STYLE).filter((f) => f.ruleId === 'qualify-in-subquery'), [], 'needs the parse tree');
     // Alias in the subquery: the hint names the alias; a derived table in FROM is not flagged; nesting flags each level.
     const aliased = await rule("SELECT id FROM payment WHERE staff_id IN (SELECT id FROM staff s WHERE first_name = 'Mike')");
-    assert.deepStrictEqual(aliased.map((f) => f.message.match(/Prefix it \((.*?)\) to be sure/)[1]), ['s.id', 's.first_name']);
+    assert.deepStrictEqual(aliased.map((f) => f.message.match(/To be sure, write `(.*?)`/)[1]), ['s.id', 's.first_name']);
     assert.match(aliased[0].message, /If `s` has an `id` column/);
     assert.deepStrictEqual(await rule('SELECT d.n FROM (SELECT count(*) AS n, staff_id FROM payment GROUP BY staff_id) d WHERE d.n > 1'), []);
     const nested = await rule('SELECT id FROM a WHERE x IN (SELECT y FROM b WHERE z = (SELECT w FROM c))');
-    assert.deepStrictEqual(nested.map((f) => f.message.match(/^Suggestion: `(\w+)` has no table prefix/)[1]), ['y', 'z', 'w']);
+    assert.deepStrictEqual(nested.map((f) => f.message.match(/: `(\w+)` has no table prefix/)[1]), ['y', 'z', 'w']);
     assert.deepStrictEqual(await rule('SELECT * FROM a WHERE x IN (SELECT * FROM b)'), [], 'star is not a column');
   });
 
@@ -291,6 +295,43 @@ function test(name, fn) {
     // An apostrophe inside a comment does not open a literal that would hide a later noqa.
     const apostrophe = "SELECT 1 -- it's fine\nfrom t; -- noqa";
     assert.deepStrictEqual(checkStyle(apostrophe, DEFAULT_STYLE), []);
+  });
+
+  await test('ignore quick fix: adds `-- noqa: qualify-in-subquery` at the end of the line and the finding goes', async () => {
+    const lint = async (sql) => checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    const apply = (sql, e) => sql.slice(0, e.offset) + e.newText + sql.slice(e.offset + e.length);
+    const sql = ['SELECT title', 'FROM film', 'WHERE id NOT IN (', '    SELECT film_id   ', '    FROM film_category', ');'].join('\n');
+    const [finding] = await lint(sql);
+    const edit = noqaEdit(sql, finding);
+    assert.strictEqual(edit.title, 'Ignore on this line (-- noqa: qualify-in-subquery)');
+    const fixed = apply(sql, edit);
+    assert.strictEqual(fixed.split('\n')[3], '    SELECT film_id  -- noqa: qualify-in-subquery', 'trailing spaces replaced');
+    assert.deepStrictEqual(await lint(fixed), []);
+    // Already silenced: no fix offered.
+    assert.strictEqual(noqaEdit(fixed, finding), undefined);
+  });
+
+  await test('ignore quick fix: one edit clears every finding on the line; appends to an existing noqa list or comment', async () => {
+    const lint = async (sql) => checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery');
+    const apply = (sql, e) => sql.slice(0, e.offset) + e.newText + sql.slice(e.offset + e.length);
+    const two = "SELECT id FROM film WHERE x = (SELECT a FROM t WHERE b = 'Mike');";
+    const findings = await lint(two);
+    assert.strictEqual(findings.length, 2);
+    assert.deepStrictEqual(await lint(apply(two, noqaEdit(two, findings[1]))), []);
+    // An existing named noqa: the rule is appended to its list.
+    const listed = "SELECT id FROM film WHERE x = (SELECT a FROM t); -- noqa: select-star";
+    const appended = apply(listed, noqaEdit(listed, (await lint(listed))[0]));
+    assert.strictEqual(appended, "SELECT id FROM film WHERE x = (SELECT a FROM t); -- noqa: select-star, qualify-in-subquery");
+    assert.deepStrictEqual(await lint(appended), []);
+    // An ordinary trailing comment: the noqa follows it (still one comment, still ordinary SQL).
+    const noted = 'SELECT id FROM film WHERE x = (SELECT a FROM t); -- my note';
+    const after = apply(noted, noqaEdit(noted, (await lint(noted))[0]));
+    assert.strictEqual(after, 'SELECT id FROM film WHERE x = (SELECT a FROM t); -- my note  -- noqa: qualify-in-subquery');
+    assert.deepStrictEqual(await lint(after), []);
+    await parse(after);
+    // A line that ends inside a multi-line string literal gets no fix (the comment would become text).
+    const literal = "SELECT id FROM film WHERE x = (SELECT a FROM t WHERE n = 'multi\nline');";
+    assert.strictEqual(noqaEdit(literal, (await lint(literal))[0]), undefined);
   });
 
   await test('style: rules can be switched off', () => {

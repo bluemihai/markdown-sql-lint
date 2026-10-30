@@ -73,7 +73,9 @@ so the filter keeps every row. The parser cannot know your schema, so the rule f
 shape — every unqualified column inside `= (SELECT …)`, `IN (SELECT …)` or
 `EXISTS (SELECT …)` — because `staff.staff_id` would have produced a real error message.
 This may or may not be a bug: if the inner table does have the column, the query is fine
-and you can ignore the suggestion. Derived tables in `FROM` are left alone.
+and you can ignore the suggestion. The squiggle's Quick Fix (Cmd+. / Ctrl+.) offers
+**Ignore on this line**, which adds `-- noqa: qualify-in-subquery` to that line (see
+below). Derived tables in `FROM` are left alone.
 
 Style rules are *suggestions by design*: they render as blue info squiggles (never red),
 their messages start with "Suggestion:", and they only appear on blocks that already

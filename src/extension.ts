@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { parse, SqlError, hasSqlDetails } from 'libpg-query';
 import { extractSqlFences, offsetToPosition, tokenLengthAt } from './fences';
 import { hintFor, tokenFromMessage } from './hints';
-import { checkStyle, applyFixes, DEFAULT_STYLE, StyleFinding } from './rules';
+import { checkStyle, applyFixes, noqaEdit, DEFAULT_STYLE, StyleFinding } from './rules';
 import { splitPsql, PsqlFinding, PsqlMode } from './psql';
 
 const SOURCE = 'markdown-sql-lint';
@@ -16,7 +16,13 @@ interface StoredFix {
   range: vscode.Range;
   newText: string;
   title: string;
+  /** Where the cursor must be for the fix to be offered; defaults to `range`. */
+  anchor?: vscode.Range;
+  diagnostic?: vscode.Diagnostic;
 }
+
+/** Rules whose findings offer "Ignore on this line" (a `-- noqa` comment) as a quick fix. */
+const IGNORABLE_RULES = new Set(['qualify-in-subquery']);
 const quickFixes = new Map<string, StoredFix[]>();
 
 function config() {
@@ -107,6 +113,18 @@ function toStyleDiagnostic(
       range: new vscode.Range(startLine + fixStart.line, fixStart.character, startLine + fixEnd.line, fixEnd.character),
       newText: finding.fix.newText,
       title: finding.fix.title,
+    });
+  }
+  const ignore = IGNORABLE_RULES.has(finding.ruleId) ? noqaEdit(sql, finding) : undefined;
+  if (ignore) {
+    const at = offsetToPosition(sql, ignore.offset);
+    const until = offsetToPosition(sql, ignore.offset + ignore.length);
+    fixes.push({
+      range: new vscode.Range(startLine + at.line, at.character, startLine + until.line, until.character),
+      newText: ignore.newText,
+      title: ignore.title,
+      anchor: range,
+      diagnostic,
     });
   }
   return diagnostic;
@@ -230,11 +248,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerCodeActionsProvider('markdown', {
       provideCodeActions(doc, range) {
         const actions: vscode.CodeAction[] = [];
+        // Two findings on one line share the same ignore edit: offer it once.
+        const offered = new Set<string>();
         for (const fix of quickFixes.get(doc.uri.toString()) ?? []) {
-          if (fix.range.intersection(range) || fix.range.start.isEqual(range.start)) {
+          const anchor = fix.anchor ?? fix.range;
+          const key = `${fix.title}@${fix.range.start.line}:${fix.range.start.character}`;
+          if ((anchor.intersection(range) || anchor.start.isEqual(range.start)) && !offered.has(key)) {
+            offered.add(key);
             const action = new vscode.CodeAction(fix.title, vscode.CodeActionKind.QuickFix);
             action.edit = new vscode.WorkspaceEdit();
             action.edit.replace(doc.uri, fix.range, fix.newText);
+            if (fix.diagnostic) {
+              action.diagnostics = [fix.diagnostic];
+            }
             actions.push(action);
           }
         }

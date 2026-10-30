@@ -210,19 +210,8 @@ function applyNoqa(sql: string, findings: StyleFinding[]): StyleFinding[] {
     return findings;
   }
   const byLine = new Map<number, Set<string> | 'all'>();
-  const token = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\*[\s\S]*?\*\//g;
-  const noqa = /\bnoqa\b(?:\s*:\s*([A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*))?/i;
-  let m;
-  while ((m = token.exec(sql)) !== null) {
-    if (!m[0].startsWith('--') && !m[0].startsWith('/*')) {
-      continue;
-    }
-    const found = noqa.exec(m[0]);
-    if (!found) {
-      continue;
-    }
-    const line = lineOf(sql, m.index);
-    if (!found[1]) {
+  for (const { line, rules: named } of noqaComments(sql)) {
+    if (!named) {
       byLine.set(line, 'all');
       continue;
     }
@@ -231,7 +220,7 @@ function applyNoqa(sql: string, findings: StyleFinding[]): StyleFinding[] {
       continue;
     }
     const rules = current ?? new Set<string>();
-    for (const id of found[1].split(',')) {
+    for (const id of named.split(',')) {
       rules.add(id.trim().toLowerCase());
     }
     byLine.set(line, rules);
@@ -243,6 +232,74 @@ function applyNoqa(sql: string, findings: StyleFinding[]): StyleFinding[] {
     const rules = byLine.get(lineOf(sql, f.offset));
     return !(rules === 'all' || rules?.has(f.ruleId));
   });
+}
+
+/** `'…'`, `"…"`, `-- …` and `/* … *\/`, scanned left to right so each hides the others' markers. */
+const LEXICAL_TOKEN = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\*[\s\S]*?\*\//g;
+const NOQA = /\bnoqa\b(?:\s*:\s*([A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*))?/i;
+
+interface NoqaComment {
+  /** 0-based line the comment starts on (the line it silences). */
+  line: number;
+  /** The rule list as written (`keyword-case, select-star`), or undefined for a bare `noqa`. */
+  rules?: string;
+  /** Character offset just past the rule list (or past the bare `noqa`). */
+  end: number;
+}
+
+/** Every `noqa` comment in `sql`; a `noqa` inside a string literal or quoted identifier is not one. */
+function noqaComments(sql: string): NoqaComment[] {
+  const out: NoqaComment[] = [];
+  const token = new RegExp(LEXICAL_TOKEN.source, 'g');
+  let m;
+  while ((m = token.exec(sql)) !== null) {
+    if (!m[0].startsWith('--') && !m[0].startsWith('/*')) {
+      continue;
+    }
+    const found = NOQA.exec(m[0]);
+    if (found) {
+      out.push({ line: lineOf(sql, m.index), rules: found[1], end: m.index + found.index + found[0].length });
+    }
+  }
+  return out;
+}
+
+/**
+ * The "Ignore on this line" quick fix for a finding: the edit that adds its
+ * rule to a `noqa` comment on the finding's line, so the next lint drops it.
+ * Appends to an existing `-- noqa: …` list when the line has one, otherwise
+ * ends the line with `  -- noqa: <rule-id>` (after any trailing comment, which
+ * the `--` then simply continues). Undefined when the line is already silenced
+ * for this rule, or when it ends inside a multi-line string literal (a comment
+ * there would become part of the string).
+ */
+export function noqaEdit(sql: string, finding: StyleFinding): { offset: number; length: number; newText: string; title: string } | undefined {
+  const line = lineOf(sql, finding.offset);
+  const lineStart = sql.lastIndexOf('\n', finding.offset - 1) + 1;
+  const nl = sql.indexOf('\n', finding.offset);
+  const lineEnd = nl === -1 ? sql.length : nl;
+  const title = `Ignore on this line (-- noqa: ${finding.ruleId})`;
+
+  const existing = noqaComments(sql).filter((c) => c.line === line);
+  if (existing.some((c) => !c.rules || c.rules.split(',').some((id) => id.trim().toLowerCase() === finding.ruleId))) {
+    return undefined;
+  }
+  const named = existing.find((c) => c.rules);
+  if (named) {
+    return { offset: named.end, length: 0, newText: `, ${finding.ruleId}`, title };
+  }
+
+  const token = new RegExp(LEXICAL_TOKEN.source, 'g');
+  let m;
+  while ((m = token.exec(sql)) !== null && m.index < lineEnd) {
+    const isLiteral = m[0].startsWith("'") || m[0].startsWith('"');
+    if (isLiteral && m.index + m[0].length > lineEnd) {
+      return undefined;
+    }
+  }
+  const trailing = /[ \t]*$/.exec(sql.slice(lineStart, lineEnd))!;
+  const at = lineStart + trailing.index;
+  return { offset: at, length: lineEnd - at, newText: `  -- noqa: ${finding.ruleId}`, title };
 }
 
 /** 0-based line of a character offset into `sql`. */
@@ -280,15 +337,25 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
     const col: string = fields[0].String.sval;
     const offset = toCharOffset(ref.location);
     const token = sql.slice(offset).match(/^"(?:[^"]|"")*"|^[A-Za-z_][A-Za-z0-9_$]*/);
-    const hint = table === undefined ? `table.${col}, or an alias` : table.isAlias ? `${table.name}.${col}` : `${table.name}.${col}, or an alias`;
-    const owner = table === undefined ? 'the inner table' : `\`${table.name}\``;
+    const owner = table === undefined ? "one of the subquery's tables" : `\`${table.name}\``;
+    const prefix =
+      table === undefined
+        ? `write it as \`table.${col}\` (the right table or alias)`
+        : table.isAlias
+          ? `write \`${table.name}.${col}\``
+          : `write \`${table.name}.${col}\` (or use an alias)`;
     const article = /^[aeiou]/i.test(col) ? 'an' : 'a';
+    // Three short lines for the hover: what it is (a hint), why it matters, what to do.
     findings.push({
       offset,
       length: token ? token[0].length : col.length,
-      message: `Suggestion: \`${col}\` has no table prefix. If ${owner} has ${article} \`${col}\` column this is fine and you can ignore it. If it does not, PostgreSQL silently takes \`${col}\` from the OUTER query instead and the query runs without an error. Prefix it (${hint}) to be sure.`,
+      message:
+        `Suggestion, worth a quick check (not an error): \`${col}\` has no table prefix.\n` +
+        `If ${owner} has ${article} \`${col}\` column, this is fine. If not, PostgreSQL silently uses the outer query's \`${col}\` instead, and the query still runs without an error.\n` +
+        `To be sure, ${prefix}. Or, if you know it's fine, ignore this line with Quick Fix (Cmd+. / Ctrl+.).`,
       ruleId: 'qualify-in-subquery',
-      // no auto-fix: only the author knows which table the column was meant to come from
+      // no auto-fix that qualifies: only the author knows which table the column was meant to come from.
+      // The extension offers "Ignore on this line" via noqaEdit instead.
     });
   };
 
