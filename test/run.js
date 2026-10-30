@@ -334,6 +334,53 @@ function test(name, fn) {
     assert.strictEqual(noqaEdit(literal, (await lint(literal))[0]), undefined);
   });
 
+  await test('narrowing: the statement text proves the inner table has the column, so no finding', async () => {
+    const cols = async (sql) =>
+      checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery').map((f) => sql.slice(f.offset, f.offset + f.length));
+    // C: the outer query reads only tables the subquery reads too.
+    assert.deepStrictEqual(await cols('SELECT AVG(length) FROM film WHERE length > (SELECT AVG(length) FROM film);'), []);
+    assert.deepStrictEqual(
+      await cols("SELECT title FROM film WHERE release_year = (SELECT film.release_year FROM actor JOIN film_actor fa ON fa.actor_id = actor.id JOIN film ON film.id = fa.film_id WHERE first_name = 'Sean' LIMIT 1);"),
+      []
+    );
+    // B: a derived table in the subquery's FROM outputs that name (COUNT(id) is called "count").
+    assert.deepStrictEqual(
+      await cols('SELECT customer_id FROM rental GROUP BY customer_id HAVING COUNT(id) >= (SELECT AVG(count) FROM (SELECT customer_id, COUNT(id) FROM rental GROUP BY customer_id) AS per_customer);'),
+      []
+    );
+    assert.deepStrictEqual(await cols('SELECT id FROM a WHERE x > (SELECT AVG(n) FROM (SELECT 1) AS d(n));'), [], 'alias column list');
+    // A: the same column is written qualified on the inner table elsewhere in the statement.
+    assert.deepStrictEqual(await cols('SELECT id FROM payment WHERE staff_id IN (SELECT staff_id FROM staff s WHERE s.staff_id > 0);'), []);
+    assert.deepStrictEqual(await cols('SELECT s.staff_id FROM staff s JOIN payment p ON p.amount > 1 WHERE p.id IN (SELECT staff_id FROM staff);'), []);
+  });
+
+  await test('narrowing: never hides a bare column that could come from an outer table', async () => {
+    const cols = async (sql) =>
+      checkStyle(sql, DEFAULT_STYLE, await parse(sql)).filter((f) => f.ruleId === 'qualify-in-subquery').map((f) => sql.slice(f.offset, f.offset + f.length));
+    // The classic bug: outer payment, inner staff, nothing qualified.
+    assert.deepStrictEqual(await cols('SELECT id FROM payment WHERE staff_id = (SELECT staff_id FROM staff);'), ['staff_id']);
+    // Qualified on the OUTER table only: proves payment has it, not staff.
+    assert.deepStrictEqual(await cols('SELECT p.staff_id FROM payment p WHERE p.staff_id = (SELECT staff_id FROM staff);'), ['staff_id']);
+    // C needs every outer table inside: an extra outer table (JOIN) keeps it flagged.
+    assert.deepStrictEqual(await cols('SELECT title FROM film JOIN language l ON l.id = film.language_id WHERE length > (SELECT AVG(length) FROM film);'), ['length']);
+    // C looks at every enclosing level, not just the nearest one.
+    assert.deepStrictEqual(await cols('SELECT 1 FROM payment WHERE x IN (SELECT a FROM film WHERE b = (SELECT c FROM film));'), ['a', 'b', 'c']);
+    // A CTE or derived table in the outer FROM: its columns are not knowable, rule C is off.
+    assert.deepStrictEqual(await cols('WITH film AS (SELECT 1 AS length) SELECT 1 FROM film WHERE length > (SELECT AVG(length) FROM film);'), ['length']);
+    // An alias that means two tables in one statement is not evidence.
+    assert.deepStrictEqual(
+      await cols('SELECT 1 FROM (SELECT s.staff_id FROM payment s) d, rental WHERE x IN (SELECT staff_id FROM staff s);'),
+      ['staff_id']
+    );
+    // The derived table outputs other names: still flagged.
+    assert.deepStrictEqual(await cols('SELECT 1 FROM rental WHERE x > (SELECT AVG(amount) FROM (SELECT COUNT(id) FROM rental) d);'), ['amount']);
+    // An UPDATE's target table is an outer level too: rule C stays off unless it is inside as well.
+    assert.deepStrictEqual(
+      await cols('UPDATE film SET x = 1 WHERE id IN (SELECT a FROM payment WHERE b IN (SELECT c FROM payment));'),
+      ['c']
+    );
+  });
+
   await test('style: rules can be switched off', () => {
     const off = { keywordCase: 'off', requireSemicolon: false, discourageSelectStar: false, joinOnSameLine: false };
     assert.deepStrictEqual(checkStyle('select * from users', off), []);

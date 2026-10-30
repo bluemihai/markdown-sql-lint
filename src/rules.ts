@@ -329,12 +329,18 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
   const findings: StyleFinding[] = [];
   const toCharOffset = byteToCharOffset(sql);
 
-  const flagColumn = (ref: AstNode, table: TableHint | undefined) => {
+  let facts: StatementFacts = emptyFacts();
+
+  const flagColumn = (ref: AstNode, scope: Scope) => {
+    const table = scope.table;
     const fields: AstNode[] = ref.fields ?? [];
     if (fields.length !== 1 || !fields[0].String || typeof ref.location !== 'number' || ref.location < 0) {
       return; // `t.col` / `t.*` are qualified; `*` is not a column
     }
     const col: string = fields[0].String.sval;
+    if (innerSurelyHas(col, scope.select!, scope.outers, facts)) {
+      return;
+    }
     const offset = toCharOffset(ref.location);
     const token = sql.slice(offset).match(/^"(?:[^"]|"")*"|^[A-Za-z_][A-Za-z0-9_$]*/);
     const owner = table === undefined ? "one of the subquery's tables" : `\`${table.name}\``;
@@ -362,7 +368,9 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
   // `scope.select` is the SelectStmt we are inside; `scope.flag` says whether
   // its bare columns are suspects (it is a SubLink subselect of a query that has
   // a FROM). Every SelectStmt opens its own scope, so nesting works per level.
-  const visit = (node: unknown, scope: { select?: AstNode; flag: boolean; table?: TableHint }): void => {
+  // `scope.outers` lists every enclosing query level (a superset is fine: it only
+  // makes narrowing rule C stricter).
+  const visit = (node: unknown, scope: Scope): void => {
     if (Array.isArray(node)) {
       for (const item of node) {
         visit(item, scope);
@@ -375,7 +383,7 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
     const n = node as AstNode;
     if (n.ColumnRef) {
       if (scope.flag) {
-        flagColumn(n.ColumnRef, scope.table);
+        flagColumn(n.ColumnRef, scope);
       }
       return;
     }
@@ -384,23 +392,242 @@ function checkSubqueryQualification(sql: string, tree: ParseTree): StyleFinding[
       const sub: AstNode | undefined = n.SubLink.subselect?.SelectStmt;
       if (sub) {
         const outerHasFrom = Array.isArray(scope.select?.fromClause) && scope.select!.fromClause.length > 0;
-        visit(sub, { select: sub, flag: outerHasFrom, table: singleTable(sub) });
+        visit(sub, { select: sub, flag: outerHasFrom, table: singleTable(sub), outers: enclosing(scope) });
       }
       return;
     }
     if (n.SelectStmt) {
       // A new scope that is not a SubLink subselect (top level, derived table in
       // FROM, CTE, UNION arm): its own bare columns are fine.
-      visit(n.SelectStmt, { select: n.SelectStmt, flag: false });
+      visit(n.SelectStmt, { select: n.SelectStmt, flag: false, outers: enclosing(scope) });
       return;
+    }
+    for (const kind of ['UpdateStmt', 'DeleteStmt', 'MergeStmt']) {
+      if (n[kind]) {
+        // Its target table is visible to subqueries below: an enclosing level, not a SelectStmt scope
+        // (so the rule still does not fire here, exactly as before).
+        const s = n[kind];
+        const level = { fromClause: [s.relation, ...(s.fromClause ?? []), ...(s.usingClause ?? []), ...(s.sourceRelation ? [s.sourceRelation] : [])] };
+        visit(s, { ...scope, outers: [...scope.outers, level] });
+        return;
+      }
     }
     for (const key of Object.keys(n)) {
       visit(n[key], scope);
     }
   };
 
-  visit(tree?.stmts ?? [], { flag: false });
+  for (const stmt of tree?.stmts ?? []) {
+    facts = statementFacts(stmt);
+    visit(stmt, { flag: false, outers: [] });
+  }
   return findings;
+}
+
+interface Scope {
+  select?: AstNode;
+  flag: boolean;
+  table?: TableHint;
+  /** Every enclosing query level's node (each has a `fromClause`). */
+  outers: AstNode[];
+}
+
+/** The levels a scope nested inside `scope` can see: `scope`'s own outers plus `scope` itself. */
+function enclosing(scope: Scope): AstNode[] {
+  return scope.select ? [...scope.outers, scope.select] : scope.outers;
+}
+
+/** What one SQL statement's text tells us about its tables, without any schema. */
+interface StatementFacts {
+  /** WITH names: a FROM item with one of these names is a CTE, not a table. */
+  ctes: Set<string>;
+  /** table key (`schema.name` or `name`) -> columns written qualified as `<alias or name>.<col>` somewhere in the statement. */
+  qualified: Map<string, Set<string>>;
+}
+
+function emptyFacts(): StatementFacts {
+  return { ctes: new Set(), qualified: new Map() };
+}
+
+function walk(node: unknown, fn: (n: AstNode) => void): void {
+  if (Array.isArray(node)) {
+    node.forEach((item) => walk(item, fn));
+  } else if (node !== null && typeof node === 'object') {
+    fn(node as AstNode);
+    for (const value of Object.values(node as AstNode)) {
+      walk(value, fn);
+    }
+  }
+}
+
+function tableKey(rv: AstNode): string {
+  return rv.schemaname ? `${rv.schemaname}.${rv.relname}` : rv.relname;
+}
+
+function statementFacts(stmt: unknown): StatementFacts {
+  const facts = emptyFacts();
+  walk(stmt, (n) => {
+    if (n.CommonTableExpr?.ctename) {
+      facts.ctes.add(n.CommonTableExpr.ctename);
+    }
+  });
+  // name a query uses for a table (its alias, or its bare name) -> table key.
+  // A name that could mean two things (two tables, a CTE, a derived table or
+  // function alias) maps to null and is never used as evidence.
+  const names = new Map<string, string | null>();
+  const bind = (name: string, key: string | null) => {
+    names.set(name, names.has(name) && names.get(name) !== key ? null : key);
+  };
+  walk(stmt, (n) => {
+    if (n.RangeVar) {
+      const rv = n.RangeVar;
+      const isCte = !rv.schemaname && facts.ctes.has(rv.relname);
+      bind(rv.alias?.aliasname ?? rv.relname, isCte ? null : tableKey(rv));
+    } else {
+      for (const kind of ['RangeSubselect', 'RangeFunction', 'RangeTableFunc', 'JoinExpr']) {
+        const alias = n[kind]?.alias?.aliasname;
+        if (alias) {
+          bind(alias, null);
+        }
+      }
+    }
+  });
+  for (const cte of facts.ctes) {
+    bind(cte, null);
+  }
+  walk(stmt, (n) => {
+    const fields: AstNode[] | undefined = n.ColumnRef?.fields;
+    if (fields?.length === 2 && fields[0].String && fields[1].String) {
+      const key = names.get(fields[0].String.sval);
+      if (key) {
+        const cols = facts.qualified.get(key) ?? new Set<string>();
+        cols.add(fields[1].String.sval);
+        facts.qualified.set(key, cols);
+      }
+    }
+  });
+  return facts;
+}
+
+/** The tables in a FROM list (through JOINs), as keys; null if any item is not a plain table (derived table, function, CTE, …). */
+function plainTables(from: AstNode[], facts: StatementFacts): string[] | null {
+  const keys: string[] = [];
+  const add = (item: AstNode): boolean => {
+    if (item?.RangeVar) {
+      if (!item.RangeVar.schemaname && facts.ctes.has(item.RangeVar.relname)) {
+        return false;
+      }
+      keys.push(tableKey(item.RangeVar));
+      return true;
+    }
+    if (item?.JoinExpr) {
+      return add(item.JoinExpr.larg) && add(item.JoinExpr.rarg);
+    }
+    return false;
+  };
+  return from.every(add) ? keys : null;
+}
+
+/** Plain tables in a FROM list (through JOINs), skipping anything else. */
+function someTables(from: AstNode[], facts: StatementFacts): string[] {
+  const keys: string[] = [];
+  walkFrom(from, (item) => {
+    if (item.RangeVar && !(!item.RangeVar.schemaname && facts.ctes.has(item.RangeVar.relname))) {
+      keys.push(tableKey(item.RangeVar));
+    }
+  });
+  return keys;
+}
+
+/** Visit each FROM item, descending into JOINs (not into derived tables). */
+function walkFrom(from: AstNode[], fn: (item: AstNode) => void): void {
+  for (const item of from) {
+    if (item?.JoinExpr) {
+      walkFrom([item.JoinExpr.larg, item.JoinExpr.rarg], fn);
+    } else if (item) {
+      fn(item);
+    }
+  }
+}
+
+/** Output column names of a derived table `(SELECT …) AS d(…)`, as PostgreSQL names them. */
+function derivedColumns(rs: AstNode): Set<string> {
+  let select: AstNode | undefined = rs.subquery?.SelectStmt;
+  while (select?.larg) {
+    select = select.larg; // UNION / INTERSECT / EXCEPT: names come from the first arm
+  }
+  const names: string[] = (select?.targetList ?? []).map((t: AstNode) => {
+    const rt = t.ResTarget ?? {};
+    if (rt.name) {
+      return rt.name;
+    }
+    const ref = rt.val?.ColumnRef?.fields;
+    if (ref?.length && ref[ref.length - 1].String) {
+      return ref[ref.length - 1].String.sval;
+    }
+    const fn = rt.val?.FuncCall?.funcname;
+    if (fn?.length && fn[fn.length - 1].String) {
+      return fn[fn.length - 1].String.sval;
+    }
+    return undefined;
+  });
+  (rs.alias?.colnames ?? []).forEach((c: AstNode, i: number) => {
+    names[i] = c.String?.sval;
+  });
+  return new Set(names.filter((n): n is string => typeof n === 'string'));
+}
+
+/**
+ * Narrowing (Mihai 2026-10-30: "guessing based on SQL only within that query
+ * works"). A bare column inside a subquery binds to the subquery's own tables
+ * first and only falls through to an outer query when none of them has it. So
+ * the finding is noise whenever the statement's own text proves an inner table
+ * has the column, or proves no outer table can have it without an inner one
+ * having it too. Each rule below only ever drops a finding in one of those two
+ * cases; anything uncertain stays flagged.
+ */
+function innerSurelyHas(col: string, select: AstNode, outers: AstNode[], facts: StatementFacts): boolean {
+  const from: AstNode[] = select.fromClause ?? [];
+  const inner = someTables(from, facts);
+
+  // (my rule) A: the same column is written qualified on one of the subquery's
+  // tables elsewhere in the statement (`s.staff_id`, `film.length`). Reason: if
+  // that table lacked the column, the qualified reference would already be a
+  // real PostgreSQL error, so either the student sees that error or the bare
+  // name binds to the inner table. A name used for two different things in the
+  // statement is not evidence.
+  if (inner.some((key) => facts.qualified.get(key)?.has(col))) {
+    return true;
+  }
+
+  // (my rule) B: a derived table in the subquery's FROM outputs a column with
+  // this name (`FROM (SELECT customer_id, COUNT(id) …) AS d` outputs `count`).
+  // Reason: its column list is right there in the text, so the bare name binds
+  // to it, never to the outer query.
+  let derived = false;
+  walkFrom(from, (item) => {
+    if (item.RangeSubselect && derivedColumns(item.RangeSubselect).has(col)) {
+      derived = true;
+    }
+  });
+  if (derived) {
+    return true;
+  }
+
+  // (my rule) C: every table of every enclosing query level also appears in the
+  // subquery's own FROM (`WHERE length > (SELECT AVG(length) FROM film)` inside
+  // `… FROM film`). Reason: an outer table could only supply the column if the
+  // same table, read again inside, had it too, in which case the inner one wins;
+  // so the name can never silently come from outside. Any enclosing FROM item
+  // that is not a plain table (derived table, function, CTE) disables this rule.
+  const innerSet = new Set(inner);
+  for (const level of outers) {
+    const keys = plainTables(level.fromClause ?? [], facts);
+    if (keys === null || !keys.every((k) => innerSet.has(k))) {
+      return false;
+    }
+  }
+  return outers.length > 0;
 }
 
 interface TableHint {

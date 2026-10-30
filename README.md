@@ -77,6 +77,17 @@ and you can ignore the suggestion. The squiggle's Quick Fix (Cmd+. / Ctrl+.) off
 **Ignore on this line**, which adds `-- noqa: qualify-in-subquery` to that line (see
 below). Derived tables in `FROM` are left alone.
 
+The rule stays quiet when the statement itself shows the column must come from the
+subquery's own tables (no schema is read, only that statement's text):
+
+- the same column is written qualified on an inner table elsewhere in the statement
+  (`s.staff_id`): if `staff` lacked it, that would already be a real error;
+- a derived table in the subquery's `FROM` outputs that name
+  (`FROM (SELECT customer_id, COUNT(id) …) AS d` outputs `count`);
+- every table of every outer query level is also read inside the subquery
+  (`WHERE length > (SELECT AVG(length) FROM film)` inside `… FROM film`): an outer table
+  could only supply the column if the inner copy had it too, and then the inner one wins.
+
 Style rules are *suggestions by design*: they render as blue info squiggles (never red),
 their messages start with "Suggestion:", and they only appear on blocks that already
 parse — a block with a syntax error shows exactly one problem, the error.
