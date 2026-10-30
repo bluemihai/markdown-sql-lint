@@ -21,6 +21,18 @@ interface StoredFix {
   diagnostic?: vscode.Diagnostic;
 }
 
+/**
+ * The extension's Marketplace page, from package.json publisher + name: each style
+ * diagnostic's rule id links to `<page>#<rule-id>`, the README section of that name
+ * (Mihai 2026-10-30, "3d C"). The Marketplace serves README headings with GitHub-style
+ * ids (`<h2 id=settings>`), so the anchor lands on the section once that README is published.
+ */
+let ruleDocsUrl: string | undefined;
+
+function marketplaceUrl(publisher: string, name: string): string {
+  return `https://marketplace.visualstudio.com/items?itemName=${publisher}.${name}`;
+}
+
 const quickFixes = new Map<string, StoredFix[]>();
 
 function config() {
@@ -103,7 +115,7 @@ function toStyleDiagnostic(
   const range = new vscode.Range(startLine + start.line, start.character, startLine + end.line, end.character);
   const diagnostic = new vscode.Diagnostic(range, finding.message, vscode.DiagnosticSeverity.Information);
   diagnostic.source = SOURCE;
-  diagnostic.code = finding.ruleId;
+  diagnostic.code = ruleDocsUrl ? { value: finding.ruleId, target: vscode.Uri.parse(`${ruleDocsUrl}#${finding.ruleId}`) } : finding.ruleId;
   if (finding.fix) {
     const fixStart = offsetToPosition(sql, finding.fix.offset);
     const fixEnd = offsetToPosition(sql, finding.fix.offset + finding.fix.length);
@@ -237,6 +249,8 @@ function scheduleLint(doc: vscode.TextDocument): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('markdown-sql-lint: activated');
+  const { publisher, name } = context.extension.packageJSON as { publisher?: string; name?: string };
+  ruleDocsUrl = publisher && name ? marketplaceUrl(publisher, name) : undefined;
   diagnostics = vscode.languages.createDiagnosticCollection(SOURCE);
   context.subscriptions.push(
     diagnostics,

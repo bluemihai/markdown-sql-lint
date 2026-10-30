@@ -59,6 +59,37 @@ This extension fills that gap.
 | `markdownSqlLint.rules.joinOnSameLine` | `true` | Suggest keeping a `JOIN` and its `ON` on the same line |
 | `markdownSqlLint.rules.qualifyColumnsInSubqueries` | `true` | Suggest `staff.staff_id` (or an alias) for bare column names inside a subquery — see below |
 
+## Rules
+
+Each suggestion's rule id in the hover (and in the Problems panel) links here. Every rule
+can be silenced on one line with `-- noqa: <rule-id>` (see [Silencing one line](#silencing-one-line)).
+
+### keyword-case
+
+SQL keywords in one case, uppercase by default (`select` → `SELECT`). Quick fix: change
+the word. Setting: `markdownSqlLint.rules.keywordCase` (`upper`, `lower`, `off`).
+
+### require-semicolon
+
+Every block ends its last statement with `;`. Quick fix: add it. Setting:
+`markdownSqlLint.rules.requireSemicolon`.
+
+### join-on-same-line
+
+A `JOIN` and its `ON` condition stay on one line. Quick fix: join the `ON` line to the
+`JOIN` line. Setting: `markdownSqlLint.rules.joinOnSameLine`.
+
+### select-star
+
+Off by default. Suggests listing the columns you need instead of `SELECT *`. No automatic
+fix: only you know which columns you need. Setting: `markdownSqlLint.rules.discourageSelectStar`.
+
+### qualify-in-subquery
+
+A column name without a table prefix inside a subquery (`= (SELECT …)`, `IN (SELECT …)`,
+`EXISTS (SELECT …)`). Quick fix: qualify it, when the subquery reads one table. Setting:
+`markdownSqlLint.rules.qualifyColumnsInSubqueries`. Why it matters:
+
 ### Why qualify columns in subqueries?
 
 ```sql
